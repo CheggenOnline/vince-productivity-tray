@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ChristianSpellHelper.Core</AssemblyName>
+    <RootNamespace>ChristianSpellHelper.Core</RootNamespace>
+  </PropertyGroup>
+</Project>

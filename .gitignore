@@ -1,0 +1,27 @@
+# Build and test output
+**/bin/
+**/obj/
+artifacts/
+
+# Local dependency caches
+.nuget-packages/
+.nuget-scratch/
+
+# IDE and user-local state
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Release/debug by-products
+*.pdb
+*.log
+
+# Local application data must never be committed
+settings.json
+customers.txt
+log_????-W??.txt
+*.wav
+*.mp3
+*.m4a
+*.flac

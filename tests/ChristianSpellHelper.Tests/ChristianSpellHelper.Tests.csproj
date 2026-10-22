@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <GenerateApplicationConfiguration>false</GenerateApplicationConfiguration>
+    <AssemblyName>ChristianSpellHelper.Tests</AssemblyName>
+    <RootNamespace>ChristianSpellHelper.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ChristianSpellHelper.Core\ChristianSpellHelper.Core.csproj" />
+    <ProjectReference Include="..\..\src\ChristianSpellHelper\ChristianSpellHelper.csproj" />
+    <ProjectReference Include="..\..\installer\VinceProductivityTray.Setup.csproj" />
+  </ItemGroup>
+</Project>

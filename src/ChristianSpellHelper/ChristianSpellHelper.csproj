@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>VinceProductivityTray</AssemblyName>
+    <RootNamespace>ChristianSpellHelper</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\vince-tray.ico</ApplicationIcon>
+    <Platforms>AnyCPU</Platforms>
+    <SelfContained>false</SelfContained>
+    <DebugType>embedded</DebugType>
+    <Version>0.9.0</Version>
+    <Product>Vince Productivity Tray</Product>
+    <Description>Local meeting recording controls, quick notes, and conservative English/Norwegian spell checking.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ChristianSpellHelper.Core\ChristianSpellHelper.Core.csproj" />
+    <None Update="updater.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="RecorderAssets\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Assets\vince-tray.ico" />
+    <None Include="Assets\vince-tray.svg" />
+  </ItemGroup>
+</Project>

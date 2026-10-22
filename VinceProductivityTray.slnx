@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/ChristianSpellHelper.Core/ChristianSpellHelper.Core.csproj" />
+  <Project Path="src/ChristianSpellHelper/ChristianSpellHelper.csproj" />
+  <Project Path="tests/ChristianSpellHelper.Tests/ChristianSpellHelper.Tests.csproj" />
+  <Project Path="installer/VinceProductivityTray.Setup.csproj" />
+</Solution>
