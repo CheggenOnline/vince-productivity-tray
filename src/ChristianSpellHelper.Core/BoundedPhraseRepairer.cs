@@ -156,7 +156,8 @@ internal sealed partial class BoundedPhraseRepairer
         WordOracle oracle,
         List<PhraseCandidate> candidates)
     {
-        if (token.Length < 4 || token.Length > 32 || IsProtectedToken(token.Value))
+        if (token.Length < 4 || token.Length > 32 || IsProtectedToken(token.Value) ||
+            oracle.HasCloseSuggestion(token.Value))
         {
             return;
         }
@@ -293,7 +294,9 @@ internal sealed partial class BoundedPhraseRepairer
         private readonly string _languageTag;
         private readonly int _maximumLookups;
         private readonly Dictionary<string, bool> _cache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, bool> _closeSuggestionCache = new(StringComparer.OrdinalIgnoreCase);
         private int _lookups;
+        private int _suggestionLookups;
 
         public WordOracle(ISpellService spelling, string languageTag, int maximumLookups)
         {
@@ -318,6 +321,27 @@ internal sealed partial class BoundedPhraseRepairer
             correct = _spelling.Check(_languageTag, word).Count == 0;
             _cache[word] = correct;
             return correct;
+        }
+
+        public bool HasCloseSuggestion(string word)
+        {
+            if (_closeSuggestionCache.TryGetValue(word, out var close))
+            {
+                return close;
+            }
+
+            if (_suggestionLookups >= MaximumIssueWindows)
+            {
+                return false;
+            }
+
+            _suggestionLookups++;
+            close = _spelling.Suggest(_languageTag, word, 8)
+                .Where(candidate => candidate.Length > 0 && candidate.All(character =>
+                    char.IsLetter(character) || character is '\'' or '’' or '-'))
+                .Any(candidate => ConservativeCorrectionEngine.DamerauLevenshtein(word, candidate) <= 1);
+            _closeSuggestionCache[word] = close;
+            return close;
         }
     }
 }

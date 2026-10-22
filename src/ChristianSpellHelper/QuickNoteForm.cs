@@ -31,7 +31,6 @@ internal sealed class QuickNoteForm : Form
     public void ShowForEntry()
     {
         if (Visible) return;
-        _input.Clear();
         Show();
         Activate();
         _input.Focus();
@@ -42,6 +41,7 @@ internal sealed class QuickNoteForm : Form
         if (e.KeyCode == Keys.Escape)
         {
             e.SuppressKeyPress = true;
+            _input.Clear();
             Hide();
             return;
         }
@@ -58,6 +58,7 @@ internal sealed class QuickNoteForm : Form
         try
         {
             _writer.Append(_settings().NotesFolder, _input.Text, DateTimeOffset.Now);
+            _input.Clear();
             Hide();
         }
         catch (Exception exception)
@@ -71,5 +72,17 @@ internal sealed class QuickNoteForm : Form
         {
             _saving = false;
         }
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (e.CloseReason == CloseReason.UserClosing && !Disposing)
+        {
+            e.Cancel = true;
+            Hide();
+            return;
+        }
+
+        base.OnFormClosing(e);
     }
 }

@@ -8,6 +8,7 @@ namespace ChristianSpellHelper.Core;
 public sealed partial class ConservativeCorrectionEngine
 {
     private const int MaximumSelectionLength = 20_000;
+    private const double MultiErrorLanguageMargin = 0.04;
     private static readonly IReadOnlyDictionary<string, string> NorwegianDiacriticRecovery =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -66,6 +67,11 @@ public sealed partial class ConservativeCorrectionEngine
             return Result(CorrectionStatus.SkippedAmbiguous, text, text, null, [], "Language or correction confidence was too low; nothing was changed.", stopwatch);
         }
 
+        // Ambiguous multi-language input returned above. For a remaining sentence with
+        // multiple dictionary issues, Windows' native suggestion order may safely break
+        // edit-distance-one ties while single-error text keeps the stricter old behavior.
+        var allowRankedTieBreak = selected.Issues.Count >= 2;
+
         var phraseRepairs = new BoundedPhraseRepairer(_spelling)
             .FindRepairs(selected.LanguageTag, text, selected.Issues);
         var diacriticRepairs = FindNorwegianDiacriticRepairs(selected.LanguageTag, text, words.Count)
@@ -83,7 +89,8 @@ public sealed partial class ConservativeCorrectionEngine
         var tokenCorrections = new List<AppliedCorrection>();
         foreach (var issue in currentIssues)
         {
-            if (!TryCreateCorrection(selected.LanguageTag, phraseCorrected, currentWordCount, issue, out var correction))
+            if (!TryCreateCorrection(selected.LanguageTag, phraseCorrected, currentWordCount, issue,
+                    allowRankedTieBreak, out var correction))
             {
                 continue;
             }
@@ -162,7 +169,31 @@ public sealed partial class ConservativeCorrectionEngine
         var errorCharacters = issues.Sum(static issue => issue.Length);
         var errorRate = alphabeticCharacters == 0 ? 1d : (double)errorCharacters / alphabeticCharacters;
         var shortPenalty = wordCount == 1 ? 0.04 : 0d;
-        return new LanguageAnalysis(language, issues, errorRate + shortPenalty);
+        var suggestionCost = issues
+            .Take(16)
+            .Select(issue => BestSuggestionDistance(language, text, issue))
+            .Sum();
+        var suggestionPenalty = alphabeticCharacters == 0
+            ? 1d
+            : (double)suggestionCost / alphabeticCharacters;
+        return new LanguageAnalysis(language, issues, errorRate + shortPenalty + suggestionPenalty);
+    }
+
+    private int BestSuggestionDistance(string language, string text, SpellIssue issue)
+    {
+        var original = text.Substring(issue.Start, issue.Length);
+        if (!original.Any(char.IsLetter) || original.Any(char.IsDigit) || original.Contains('_'))
+        {
+            return Math.Max(2, issue.Length);
+        }
+
+        var best = _spelling.Suggest(language, original, 8)
+            .Where(IsSimpleWord)
+            .Where(candidate => !IsCaseOnlyReplacement(original, candidate))
+            .Select(candidate => DamerauLevenshtein(original, candidate))
+            .DefaultIfEmpty(Math.Max(2, issue.Length))
+            .Min();
+        return Math.Min(best, Math.Max(2, issue.Length));
     }
 
     private bool TryCreateCorrection(
@@ -170,6 +201,7 @@ public sealed partial class ConservativeCorrectionEngine
         string text,
         int wordCount,
         SpellIssue issue,
+        bool allowRankedTieBreak,
         out AppliedCorrection correction)
     {
         correction = null!;
@@ -205,11 +237,15 @@ public sealed partial class ConservativeCorrectionEngine
                   IsCaseOnlyReplacement(original, issue.Replacement)))
         {
             var suggestions = _spelling.Suggest(language, original, 8)
-                .Where(IsSimpleWord)
-                .Where(candidate => !IsCaseOnlyReplacement(original, candidate))
-                .Select(candidate => new Candidate(candidate, DamerauLevenshtein(original, candidate)))
+                .Select((candidate, rank) => (candidate, rank))
+                .Where(candidate => IsSimpleWord(candidate.candidate))
+                .Where(candidate => !IsCaseOnlyReplacement(original, candidate.candidate))
+                .Select(candidate => new Candidate(
+                    candidate.candidate,
+                    DamerauLevenshtein(original, candidate.candidate),
+                    candidate.rank))
                 .OrderBy(static candidate => candidate.Distance)
-                .ThenBy(static candidate => candidate.Value, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(static candidate => candidate.Rank)
                 .ToArray();
 
             if (suggestions.Length == 0)
@@ -219,19 +255,25 @@ public sealed partial class ConservativeCorrectionEngine
 
             var best = suggestions[0];
             var allowedDistance = original.Length >= 8 ? 2 : 1;
+            var allowShortRankedCorrection = allowRankedTieBreak && best.Distance == 1 && original.Length >= 3;
             if (best.Distance > allowedDistance ||
-                ((double)best.Distance / original.Length > 0.26 && !AreDiacriticVariants(original, best.Value)))
+                ((double)best.Distance / original.Length > 0.26 &&
+                 !AreDiacriticVariants(original, best.Value) &&
+                 !allowShortRankedCorrection))
             {
                 return false;
             }
 
-            if (suggestions.Skip(1).Any(candidate => candidate.Distance == best.Distance))
+            var tied = suggestions.Count(candidate => candidate.Distance == best.Distance);
+            if (tied > 1 && (!allowRankedTieBreak || best.Distance != 1))
             {
                 return false;
             }
 
             replacement = best.Value;
-            reason = $"unique dictionary suggestion at edit distance {best.Distance}";
+            reason = tied == 1
+                ? $"unique dictionary suggestion at edit distance {best.Distance}"
+                : $"top-ranked Windows dictionary suggestion at edit distance {best.Distance} in a confident multi-error sentence";
         }
 
         if (string.IsNullOrWhiteSpace(replacement) || replacement.Equals(original, StringComparison.Ordinal))
@@ -252,7 +294,12 @@ public sealed partial class ConservativeCorrectionEngine
             return false;
         }
 
-        return wordCount == 1 ? margin < 0.18 : margin < 0.08;
+        var requiredMargin = wordCount == 1
+            ? 0.18
+            : first.Issues.Count >= 2
+                ? MultiErrorLanguageMargin
+                : 0.08;
+        return margin < requiredMargin;
     }
 
     private static IEnumerable<string> SelectLanguageCandidates(IReadOnlyList<string> supported)
@@ -431,5 +478,5 @@ public sealed partial class ConservativeCorrectionEngine
 
     private sealed record LanguageAnalysis(string LanguageTag, IReadOnlyList<SpellIssue> Issues, double Score);
 
-    private sealed record Candidate(string Value, int Distance);
+    private sealed record Candidate(string Value, int Distance, int Rank);
 }

@@ -7,7 +7,7 @@ internal sealed record SettingsActions(
     Func<string> UpdateStatus, Func<bool> CanInstallUpdate,
     Func<Task> CheckForUpdates, Func<Task> InstallUpdate,
     Action OpenNotes, Action OpenRecordings, Action OpenTimeLogs,
-    Action OpenDiagnostics, Action ExitApplication);
+    Action OpenDiagnostics);
 
 internal sealed class SettingsForm : Form
 {
@@ -121,11 +121,8 @@ internal sealed class SettingsForm : Form
         check.Click += async (_, _) => { if (actions is null) return; await actions.CheckForUpdates(); status.Text = actions.UpdateStatus(); install.Enabled = actions.CanInstallUpdate(); };
         install.Click += async (_, _) => { if (actions is not null) await actions.InstallUpdate(); };
         updates.Controls.Add(check); updates.Controls.Add(install); Row(c, 5, 52); c.Controls.Add(updates, 0, 5); c.SetColumnSpan(updates, 4);
-        AddHeading(c, 6, "Folders and application");
-        AddActionRow(c, 7, "Open diagnostics folder", actions?.OpenDiagnostics);
-        var exit = new Button { Text = "Exit application", AutoSize = true, MinimumSize = new Size(150, 36), Enabled = actions is not null };
-        exit.Click += (_, _) => { if (actions is not null) { page.FindForm()?.Close(); actions.ExitApplication(); } };
-        Row(c, 8, 52); c.Controls.Add(exit, 0, 8); page.Controls.Add(c); return page;
+        AddActionRow(c, 6, "Open diagnostics folder", actions?.OpenDiagnostics);
+        page.Controls.Add(c); return page;
     }
 
     private static TabPage FeatureTab(string title, string toggleText, bool enabled, out CheckBox toggle, out TableLayoutPanel content)

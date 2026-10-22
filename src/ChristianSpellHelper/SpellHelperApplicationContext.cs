@@ -343,8 +343,7 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
             () => OpenFolder(_settings.NotesFolder),
             () => OpenFolder(_settings.RecordingFolder),
             () => OpenFolder(_settings.TimeCaptureFolder),
-            () => OpenFolder(LocalLog.DirectoryPath),
-            RequestExit);
+            () => OpenFolder(LocalLog.DirectoryPath));
         using var form = new SettingsForm(_settings, _hotkeys.Probe, actions);
         if (form.ShowDialog() != DialogResult.OK) return;
         try
@@ -380,8 +379,6 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
             }
             SetStatus($"Ready - notes {_settings.NotesHotkey}, spellcheck {_settings.SpellcheckHotkey}", false);
             UpdateRecorderUi();
-            MessageBox.Show("Settings saved. Hotkey changes are active now.",
-                "Vince Productivity Tray", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception exception)
         {

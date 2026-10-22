@@ -26,6 +26,8 @@ internal static partial class Program
         Run("Skip likely name", SkipLikelyName);
         Run("Reject tied suggestions", RejectTiedSuggestions);
         Run("Detect English from error rate", DetectEnglish);
+        Run("Correct confident Norwegian multi-error sentence", CorrectNorwegianMultipleTypos);
+        Run("Correct confident English multi-error sentence", CorrectEnglishMultipleTypos);
         Run("Prefer Bokmål when both texts are clean", PreferNorwegianBokmal);
         Run("Preserve paragraph breaks", PreserveParagraphBreaks);
         Run("Preserve Norwegian phrase repair example", PreserveNorwegianPhraseRepair);
@@ -35,6 +37,7 @@ internal static partial class Program
         Run("Quick notes preserve UTF-8 and multiline text", QuickNotesPreserveText);
         Run("Quick notes use local date at save time", QuickNotesUseSaveDate);
         Run("Quick notes serialize repeated appends", QuickNotesSerializeAppends);
+        Run("Quick note close hides and can reopen", QuickNoteCloseHidesAndReopens);
         Run("Hotkey parser supports configured defaults", HotkeyDefaultsParse);
         Run("Hotkeys rebind immediately after settings save", HotkeysRebindTransactionally);
         Run("Failed hotkey rebind restores previous bindings", FailedHotkeyRebindRestoresPrevious);
@@ -196,6 +199,22 @@ internal static partial class Program
         Equal("This sentence is written in English", result.CorrectedText);
     }
 
+    private static void CorrectNorwegianMultipleTypos()
+    {
+        using var service = FakeSpellService.MultipleTypoExamples();
+        var result = new ConservativeCorrectionEngine(service).Correct("vorfor komer du ike?");
+        Equal("nb-NO", result.LanguageTag);
+        Equal("hvorfor kommer du ikke?", result.CorrectedText);
+    }
+
+    private static void CorrectEnglishMultipleTypos()
+    {
+        using var service = FakeSpellService.MultipleTypoExamples();
+        var result = new ConservativeCorrectionEngine(service).Correct("Ths sentnce has erors.");
+        Equal("en-US", result.LanguageTag);
+        Equal("This sentence has errors.", result.CorrectedText);
+    }
+
     private static void PreferNorwegianBokmal()
     {
         using var service = FakeSpellService.WithSuggestions(["en-US", "nb-NO"], new Dictionary<string, string[]>());
@@ -282,6 +301,40 @@ internal static partial class Program
         Equal(40, lines.Length);
         True(Enumerable.Range(0, 40).All(index => lines.Any(line => line.EndsWith($"note-{index}", StringComparison.Ordinal))),
             "A repeated note append was lost.");
+    }
+
+    private static void QuickNoteCloseHidesAndReopens()
+    {
+        var originalFolder = NewNoteFolder();
+        var updatedFolder = NewNoteFolder();
+        var settings = new AppSettings { NotesFolder = originalFolder };
+        using var form = new QuickNoteForm(new DailyNoteWriter(), () => settings)
+        {
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(-10000, -10000),
+        };
+        form.ShowForEntry();
+        Application.DoEvents();
+        var input = Descendants(form).OfType<TextBox>().Single();
+        input.Text = "synthetic unsent draft";
+        form.Close();
+        Application.DoEvents();
+        True(!form.IsDisposed && !form.Visible, "Closing Quick Note disposed the reusable form.");
+
+        form.ShowForEntry();
+        Application.DoEvents();
+        Equal("synthetic unsent draft", input.Text);
+        settings = settings with { NotesFolder = updatedFolder };
+        var save = typeof(QuickNoteForm).GetMethod("TrySave",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Quick Note save method was not found.");
+        save.Invoke(form, null);
+        True(!form.IsDisposed && !form.Visible, "Successful Quick Note save disposed the reusable form.");
+        var saved = Directory.GetFiles(updatedFolder, "*.txt", SearchOption.TopDirectoryOnly);
+        True(saved.Length == 1 && File.ReadAllText(saved[0], Encoding.UTF8).Contains("synthetic unsent draft", StringComparison.Ordinal),
+            "Reopened Quick Note did not use the latest settings callback or save the synthetic draft.");
+        True(Directory.GetFiles(originalFolder, "*.txt", SearchOption.TopDirectoryOnly).Length == 0,
+            "Reopened Quick Note wrote to the stale settings folder.");
     }
 
     private static void HotkeyDefaultsParse()
@@ -538,6 +591,11 @@ internal static partial class Program
         var pages = tabs.TabPages.Cast<TabPage>().ToDictionary(page => page.Text, StringComparer.Ordinal);
         True(!Descendants(pages["General"]).OfType<Button>().Any(button => button.Text is "Open notes folder" or "Open recordings folder" or "Open time log folder"),
             "Feature folder buttons remained on General.");
+        True(!Descendants(pages["General"]).Any(control => control.Text == "Folders and application") &&
+             !Descendants(pages["General"]).OfType<Button>().Any(button => button.Text == "Exit application"),
+            "The removed General folders/application section or redundant Exit button is still present.");
+        True(Descendants(pages["General"]).OfType<Button>().Any(button => button.Text == "Open diagnostics folder"),
+            "Open diagnostics folder is missing from the General Application section.");
         True(Descendants(pages["Recording"]).OfType<Button>().Any(button => button.Text == "Open recordings folder") &&
              Descendants(pages["Quick Notes"]).OfType<Button>().Any(button => button.Text == "Open notes folder") &&
              Descendants(pages["Time Capture"]).OfType<Button>().Any(button => button.Text == "Open time log folder"),
@@ -1131,7 +1189,18 @@ internal static partial class Program
             var exactPhrase = engine.Correct("hva med na da?");
             Equal("hva med nå da?", exactPhrase.CorrectedText);
             Passed.Add("Native Norwegian exact phrase correction");
+
+            var multipleNorwegian = engine.Correct("vorfor komer du ike?");
+            Equal("nb-NO", multipleNorwegian.LanguageTag);
+            Equal("hvorfor kommer du ikke?", multipleNorwegian.CorrectedText);
+            Passed.Add("Native Norwegian multi-error correction");
         }
+
+        var multipleEnglish = engine.Correct("Ths sentnce has erors.");
+        True(multipleEnglish.LanguageTag?.StartsWith("en-", StringComparison.OrdinalIgnoreCase) == true,
+            $"Native engine did not select English for a multi-error sentence; selected {multipleEnglish.LanguageTag ?? "none"}.");
+        Equal("This sentence has errors.", multipleEnglish.CorrectedText);
+        Passed.Add("Native English multi-error correction");
 
         for (var index = 0; index < 10; index++)
         {
@@ -1664,15 +1733,18 @@ internal static partial class Program
     {
         private readonly Dictionary<string, string[]> _suggestions;
         private readonly Func<string, string, IReadOnlyList<SpellIssue>>? _customCheck;
+        private readonly Func<string, string, IReadOnlyList<string>>? _customSuggest;
 
         private FakeSpellService(
             IReadOnlyList<string> languages,
             Dictionary<string, string[]> suggestions,
-            Func<string, string, IReadOnlyList<SpellIssue>>? customCheck = null)
+            Func<string, string, IReadOnlyList<SpellIssue>>? customCheck = null,
+            Func<string, string, IReadOnlyList<string>>? customSuggest = null)
         {
             SupportedLanguages = languages;
             _suggestions = suggestions;
             _customCheck = customCheck;
+            _customSuggest = customSuggest;
         }
 
         public IReadOnlyList<string> SupportedLanguages { get; }
@@ -1717,6 +1789,45 @@ internal static partial class Program
             });
         }
 
+        public static FakeSpellService MultipleTypoExamples()
+        {
+            var misspellings = new HashSet<string>(
+                ["vorfor", "komer", "ike", "Ths", "sentnce", "erors"],
+                StringComparer.OrdinalIgnoreCase);
+            var norwegian = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["vorfor"] = ["v\u00e6rform", "hvorfor", "v\u00e6rfore"],
+                ["komer"] = ["kommer", "kromer", "komet"],
+                ["ike"] = ["ikke", "IKE", "Ikea", "Iker"],
+                ["Ths"] = ["THCs", "This", "Thus"],
+                ["sentnce"] = ["sentere", "senene", "senter"],
+                ["erors"] = ["erots", "eros", "efors"],
+            };
+            var english = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["vorfor"] = ["variform", "verbform", "horror"],
+                ["komer"] = ["comer", "homer", "Kromer"],
+                ["ike"] = ["ice", "Ike", "eke", "like"],
+                ["Ths"] = ["This", "Thus", "Thys", "The"],
+                ["sentnce"] = ["sentence"],
+                ["erors"] = ["errors", "error's", "errs"],
+            };
+            return new FakeSpellService(
+                ["en-US", "nb-NO"],
+                new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase),
+                (_, text) => Tokens().Matches(text)
+                    .Where(match => misspellings.Contains(match.Value))
+                    .Select(match => new SpellIssue(match.Index, match.Length, NativeCorrectiveAction.GetSuggestions, null))
+                    .ToArray(),
+                (language, word) =>
+                {
+                    var suggestions = language.StartsWith("nb-", StringComparison.OrdinalIgnoreCase)
+                        ? norwegian
+                        : english;
+                    return suggestions.TryGetValue(word, out var values) ? values : [];
+                });
+        }
+
         public static FakeSpellService NorwegianPhraseExample()
         {
             var accepted = new HashSet<string>(
@@ -1744,8 +1855,13 @@ internal static partial class Program
                 .ToArray();
         }
 
-        public IReadOnlyList<string> Suggest(string languageTag, string word, int maximum) =>
-            _suggestions.TryGetValue(word, out var values) ? values.Take(maximum).ToArray() : [];
+        public IReadOnlyList<string> Suggest(string languageTag, string word, int maximum)
+        {
+            var values = _customSuggest is null
+                ? (_suggestions.TryGetValue(word, out var configured) ? configured : [])
+                : _customSuggest(languageTag, word);
+            return values.Take(maximum).ToArray();
+        }
 
         public void Dispose()
         {

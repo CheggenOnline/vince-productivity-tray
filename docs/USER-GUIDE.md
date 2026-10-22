@@ -1,4 +1,4 @@
-# Vince Productivity Tray 0.9.11 - short guide
+# Vince Productivity Tray 0.9.12 - short guide
 
 This is an unsigned local candidate. Use `win-arm64` on Windows on ARM and `win-x64` on ordinary Intel/AMD 64-bit Windows. Do not bypass SmartScreen, Defender, or organizational controls.
 
@@ -21,8 +21,9 @@ On an upgrade, setup does not move old data or change any configured storage pat
 
 ## Notes and spellcheck
 
-- `Ctrl+Alt+N` opens Quick note. Enter saves; Shift+Enter adds a line; Escape cancels. The window closes only after a successful UTF-8 append.
+- `Ctrl+Alt+N` opens Quick note. Enter saves; Shift+Enter adds a line; Escape cancels. The X button hides the reusable window and preserves an unsent draft; reopening resumes it. A successful UTF-8 append clears the draft and hides the window.
 - Select editable text and press `Ctrl+Shift+X` for local Windows-dictionary spellcheck. It supports configured English and Norwegian dictionaries but does not understand sentence meaning like an AI model.
+- For text containing several misspellings, the engine compares the aggregate edit quality of Windows' English and Norwegian suggestions. After the language is sufficiently clear, it may use Windows' first-ranked edit-distance-one suggestion to break a tie. For example, `vorfor komer du ike?` becomes `hvorfor kommer du ikke?`. A single ambiguous word remains unchanged. This is local dictionary ranking, not semantic sentence understanding or AI.
 - The 0.9.9 rules reject case-only suggestions such as lowercase `na` becoming `Na`. Because Windows nb-NO considers `na` valid, a bounded local rule repairs lowercase `na` to `nå` in multiword Bokmål text while leaving single-word, all-caps, and likely-name forms alone.
 
 ## Time capture
@@ -48,7 +49,7 @@ Each shortcut has **Check hotkey**:
 - **Already used by this app**: it is one of the tray app's active registrations.
 - **Invalid**: the syntax is unsupported.
 
-The check cannot detect every low-level keyboard hook or shortcut that only works inside another application. In 0.9.8, changed shortcuts become active immediately after Save. If any requested registration fails, the settings are not saved and the previous hotkeys are restored. Start with Windows is a separate manual opt-in and asks for confirmation.
+The check cannot detect every low-level keyboard hook or shortcut that only works inside another application. Changed shortcuts become active immediately after Save. A successful save closes Settings without an extra confirmation popup. If any requested registration fails, the actionable error remains visible, settings are not saved, and previous hotkeys are restored. Start with Windows is a separate manual opt-in and asks for confirmation.
 
 ## Updates and uninstall
 
