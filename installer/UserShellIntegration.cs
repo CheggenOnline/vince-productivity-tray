@@ -36,6 +36,7 @@ internal interface IUserShellIntegrationStore
     UserShellIntegrationSnapshot Capture();
     void WriteInstalledApp(InstalledAppRegistration registration);
     void WriteShortcut(StartMenuShortcut shortcut);
+    void WriteRunValue(string command);
     void RemoveInstalledApp();
     void RemoveShortcut();
     void RemoveRunValue();
@@ -47,13 +48,15 @@ internal static class UserShellIntegrationManager
     public static void Apply(
         IUserShellIntegrationStore store,
         InstalledAppRegistration registration,
-        StartMenuShortcut shortcut)
+        StartMenuShortcut shortcut,
+        bool enableStartup = false)
     {
         var snapshot = store.Capture();
         try
         {
             store.WriteInstalledApp(registration);
             store.WriteShortcut(shortcut);
+            if (enableStartup) store.WriteRunValue($"\"{shortcut.TargetPath}\"");
         }
         catch
         {
@@ -164,6 +167,13 @@ internal sealed class WindowsUserShellIntegrationStore : IUserShellIntegrationSt
         {
             if (File.Exists(temporary)) File.Delete(temporary);
         }
+    }
+
+    public void WriteRunValue(string command)
+    {
+        using var run = Registry.CurrentUser.CreateSubKey(RunSubKey, writable: true)
+            ?? throw new IOException("The per-user startup entry could not be opened.");
+        run.SetValue(RunValueName, command, RegistryValueKind.String);
     }
 
     public void RemoveInstalledApp() => Registry.CurrentUser.DeleteSubKeyTree(UninstallSubKey, throwOnMissingSubKey: false);

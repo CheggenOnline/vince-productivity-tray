@@ -41,7 +41,7 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            _log?.Write("SETUP FAILED. No startup entry was intentionally changed by this install flow.");
+            _log?.Write("SETUP FAILED. Program files and app-owned shell integration were restored when possible.");
             _log?.WriteException(exception);
             Console.Error.WriteLine($"Setup failed. Program files were rolled back when possible.\n{exception.Message}");
             if (_log is not null) Console.Error.WriteLine($"Details: {_log.Path}");
@@ -60,12 +60,13 @@ internal static class Program
         RefuseRunningProcesses();
         DescribeLegacyState();
         var firstInstall = !File.Exists(SettingsPath);
+        var hasExistingProgram = File.Exists(Path.Combine(InstallRoot, "VinceProductivityTray.exe"));
 
         if (updatePid is null)
         {
             Console.WriteLine("Install Vince Productivity Tray for the current Windows user?");
             Console.WriteLine($"Destination: {InstallRoot}");
-            Console.WriteLine("Setup will not change any Windows startup entry or legacy startup item.");
+            Console.WriteLine("New installations start with Windows by default. Upgrades preserve the existing startup choice. Legacy startup items are not changed.");
             if (firstInstall)
             {
                 Console.WriteLine("First-install storage will use VinceUtility\\Quick Notes, Meeting Recordings, and Time Capture.");
@@ -89,6 +90,7 @@ internal static class Program
                 : "Settings appeared while setup was running and were preserved without modification.");
         }
 
+        var enableStartupDefault = FreshInstallSettings.ShouldEnableStartup(SettingsPath, hasExistingProgram);
         var operation = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ") + "-" + Guid.NewGuid().ToString("N")[..8];
         var staging = Path.Combine(DataRoot, "InstallStaging", operation);
         var rollback = Path.Combine(DataRoot, "Rollback", operation);
@@ -112,11 +114,12 @@ internal static class Program
             () =>
             {
                 ValidateInstalledApplication();
-                ApplyUserShellIntegration();
+                ApplyUserShellIntegration(enableStartupDefault);
             }, Log);
 
         Log("Installation completed and the no-audio startup self-check passed.");
-        Log("Windows startup entries and legacy startup items were not changed.");
+        Log(enableStartupDefault ? "Start with Windows was enabled for this new installation." : "The existing Windows startup choice was preserved.");
+        Log("Legacy startup items were not changed.");
         if (updatePid is not null)
         {
             var executable = Path.Combine(InstallRoot, "VinceProductivityTray.exe");
@@ -125,10 +128,29 @@ internal static class Program
             return 0;
         }
         Console.WriteLine();
-        Console.WriteLine("The app was not left running and will not start with Windows yet.");
-        Console.WriteLine($"After IT/security approval, launch it manually from:\n{Path.Combine(InstallRoot, "VinceProductivityTray.exe")}");
-        Console.WriteLine("You can explicitly enable Start with Windows later in Settings.");
+        Console.WriteLine("You can change Start with Windows in Settings.");
         Console.WriteLine($"Setup log: {_log!.Path}");
+        var launchResult = InstallCompletion.OfferLaunch(
+            () => MessageBoxW(IntPtr.Zero,
+                "Installation completed successfully.\n\nStart Vince Productivity Tray now?\n\n" +
+                "The app will appear in the notification area by the clock (possibly under the hidden-icons arrow).",
+                "Vince Productivity Tray - installation complete",
+                0x00000004 | 0x00000040 | 0x00010000) == 6, // Yes/No, information, default Yes, foreground.
+            () =>
+            {
+                var executable = Path.Combine(InstallRoot, "VinceProductivityTray.exe");
+                _ = Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true })
+                    ?? throw new InvalidOperationException("Windows did not start the application.");
+                Log("The user chose to start the tray app after installation.");
+            },
+            exception =>
+            {
+                _log!.WriteException(exception);
+                Console.WriteLine("Installation is complete, but the app could not be started. Launch Vince Productivity Tray from the Start menu.");
+            });
+        if (launchResult == LaunchAfterInstallResult.Started) return 0;
+        if (launchResult == LaunchAfterInstallResult.Declined)
+            Console.WriteLine("The app was not started. You can launch Vince Productivity Tray from the Start menu later.");
         Pause();
         return 0;
     }
@@ -192,7 +214,6 @@ internal static class Program
         {
             Log("The legacy meeting-recorder startup item is already backed up/off. This state will be preserved.");
         }
-        Log("The unified app startup entry will remain off during setup.");
     }
 
     private static int LaunchUninstallWorker()
@@ -264,7 +285,7 @@ internal static class Program
         return target;
     }
 
-    private static void ApplyUserShellIntegration()
+    private static void ApplyUserShellIntegration(bool enableStartup)
     {
         var executable = Path.Combine(InstallRoot, "VinceProductivityTray.exe");
         var uninstaller = Path.Combine(InstallRoot, "Uninstall.exe");
@@ -286,7 +307,7 @@ internal static class Program
             executable + ",0",
             "Open Vince Productivity Tray");
         UserShellIntegrationManager.Apply(
-            new WindowsUserShellIntegrationStore(StartMenuShortcutPath), registration, shortcut);
+            new WindowsUserShellIntegrationStore(StartMenuShortcutPath), registration, shortcut, enableStartup);
         Log("Per-user Installed apps registration and Start-menu shortcut are present.");
     }
 
@@ -417,6 +438,9 @@ internal static class Program
     }
 
     private delegate bool EnumWindowsCallback(IntPtr window, IntPtr parameter);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int MessageBoxW(IntPtr owner, string text, string caption, uint type);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]

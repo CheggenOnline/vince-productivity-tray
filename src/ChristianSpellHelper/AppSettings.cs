@@ -25,7 +25,7 @@ internal sealed record AppSettings
     public int TimeCaptureSnoozeMinutes { get; init; } = 10;
     public string TimeCaptureWorkdayStart { get; init; } = "09:00";
     public decimal TimeCaptureTargetHours { get; init; } = 8m;
-    public bool StartWithWindows { get; init; }
+    public bool StartWithWindows { get; init; } = true;
     public bool AutoUpdateEnabled { get; init; }
     public DateTimeOffset? DeferredUpdateUntilUtc { get; init; }
 

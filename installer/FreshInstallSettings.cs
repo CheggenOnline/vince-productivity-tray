@@ -19,6 +19,14 @@ public static class FreshInstallSettings
             Path.Combine(root, "Time Capture"));
     }
 
+    internal static bool ShouldEnableStartup(string settingsPath, bool hasExistingProgram)
+    {
+        if (hasExistingProgram || !File.Exists(settingsPath)) return false;
+        using var settings = JsonDocument.Parse(File.ReadAllText(settingsPath));
+        return settings.RootElement.TryGetProperty("StartWithWindows", out var value) &&
+               value.ValueKind == JsonValueKind.True;
+    }
+
     public static bool WriteIfMissing(string settingsPath, string vinceUtilityFolder)
     {
         settingsPath = Path.GetFullPath(settingsPath);
@@ -46,7 +54,7 @@ public static class FreshInstallSettings
             TimeCaptureSnoozeMinutes = 10,
             TimeCaptureWorkdayStart = "09:00",
             TimeCaptureTargetHours = 8m,
-            StartWithWindows = false,
+            StartWithWindows = true,
             AutoUpdateEnabled = false,
             DeferredUpdateUntilUtc = (DateTimeOffset?)null,
         };

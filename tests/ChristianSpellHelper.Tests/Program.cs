@@ -83,9 +83,12 @@ internal static partial class Program
         Run("Installer validation failure restores previous files", InstallerRollbackRestoresPrevious);
         Run("Installer recovers an interrupted replacement", InstallerRecoversInterruptedReplacement);
         Run("Installer transaction supports a repeated upgrade", InstallerSupportsRepeatedUpgrade);
+        Run("Completed setup starts only with consent and preserves success on launch failure", CompletedSetupOffersLaunch);
         Run("Installer recognizes its running executable by installed path", InstallerRecognizesRunningExecutablePath);
         Run("Installed apps and Start-menu integration upgrades idempotently", UserShellIntegrationUpgradesIdempotently);
         Run("Shell integration install failure restores prior state", UserShellIntegrationApplyRollsBack);
+        Run("Startup defaults apply only to new installs and respect opt-out", FreshStartupDefaults);
+        Run("Startup registration is transactional and upgrades preserve disabled state", StartupIntegrationIsTransactional);
         Run("Uninstall removes only app-owned shell integration", UserShellIntegrationRemovalIsScoped);
         Run("Uninstall failure restores shell integration", UserShellIntegrationRemovalRollsBack);
 
@@ -896,6 +899,7 @@ internal static partial class Program
         True(!root.GetProperty("AutoRecordMeetings").GetBoolean(), "Fresh install enabled automatic recording.");
         True(!root.GetProperty("TimeCaptureEnabled").GetBoolean(), "Fresh install enabled time capture.");
         True(!root.GetProperty("AutoUpdateEnabled").GetBoolean(), "Fresh install enabled automatic updates.");
+          True(root.GetProperty("StartWithWindows").GetBoolean(), "Fresh install must default to Start with Windows.");
     }
 
     private static void ExistingSettingsArePreserved()
@@ -1227,6 +1231,54 @@ internal static partial class Program
         Equal(6 * 60 * 60 * 1000, UpdateCheckSchedule.RepeatIntervalMilliseconds);
         True(UpdateCheckSchedule.RepeatIntervalMilliseconds > UpdateCheckSchedule.InitialIntervalMilliseconds,
             "Recurring update checks are unexpectedly more frequent than the initial startup check.");
+    }
+
+    private static void FreshStartupDefaults()
+    {
+        var folder = NewNoteFolder();
+        var settingsPath = Path.Combine(folder, "settings.json");
+        True(!FreshInstallSettings.ShouldEnableStartup(settingsPath, false), "Missing settings enabled startup.");
+        FreshInstallSettings.WriteIfMissing(settingsPath, Path.Combine(folder, "VinceUtility"));
+        True(FreshInstallSettings.ShouldEnableStartup(settingsPath, false), "Fresh install did not enable startup.");
+        True(!FreshInstallSettings.ShouldEnableStartup(settingsPath, true), "Upgrade overwrote an existing startup choice.");
+        File.WriteAllText(settingsPath, "{\"StartWithWindows\":false}");
+        True(!FreshInstallSettings.ShouldEnableStartup(settingsPath, false), "Reinstall ignored explicit opt-out.");
+    }
+
+    private static void StartupIntegrationIsTransactional()
+    {
+        var folder = NewNoteFolder();
+        var shortcut = TestShortcut(folder);
+        var store = new FakeUserShellIntegrationStore(folder);
+        UserShellIntegrationManager.Apply(store, TestRegistration("0.9.16"), shortcut, enableStartup: true);
+        Equal($"\"{shortcut.TargetPath}\"", store.RunValue);
+        store.RemoveRunValue();
+        UserShellIntegrationManager.Apply(store, TestRegistration("0.9.16"), shortcut);
+        True(!store.RunValueExisted, "Upgrade enabled a previously disabled startup entry.");
+        store.FailRunValueWrite = true;
+        var failed = false;
+        try { UserShellIntegrationManager.Apply(store, TestRegistration("0.9.17"), shortcut, enableStartup: true); }
+        catch (IOException) { failed = true; }
+        True(failed, "Startup registration failure did not propagate.");
+        True(!store.RunValueExisted, "Failed install retained a partially written startup entry.");
+        Equal("0.9.16", store.Registration?.DisplayVersion);
+    }
+
+    private static void CompletedSetupOffersLaunch()
+    {
+        var starts = 0;
+        var errors = new List<Exception>();
+        Equal(LaunchAfterInstallResult.Declined,
+            InstallCompletion.OfferLaunch(() => false, () => starts++, errors.Add));
+        Equal(0, starts);
+        Equal(LaunchAfterInstallResult.Started,
+            InstallCompletion.OfferLaunch(() => true, () => starts++, errors.Add));
+        Equal(1, starts);
+        Equal(0, errors.Count);
+        Equal(LaunchAfterInstallResult.Failed,
+            InstallCompletion.OfferLaunch(() => true, () => throw new IOException("synthetic launch failure"), errors.Add));
+        Equal(1, errors.Count);
+        Equal(1, starts);
     }
 
     private static void InstallerRecognizesRunningExecutablePath()
@@ -1909,6 +1961,7 @@ internal static partial class Program
         public string? RunValue { get; set; }
         public string UnrelatedValue { get; set; } = "unrelated";
         public bool FailShortcutWrite { get; set; }
+        public bool FailRunValueWrite { get; set; }
 
         public UserShellIntegrationSnapshot Capture()
         {
@@ -1938,6 +1991,13 @@ internal static partial class Program
             if (FailShortcutWrite) throw new IOException("simulated shortcut failure");
             Directory.CreateDirectory(Path.GetDirectoryName(shortcut.Path)!);
             File.WriteAllText(shortcut.Path, shortcut.TargetPath, Encoding.UTF8);
+        }
+
+        public void WriteRunValue(string command)
+        {
+            RunValueExisted = true;
+            RunValue = command;
+            if (FailRunValueWrite) throw new IOException("synthetic startup write failure");
         }
 
         public void RemoveInstalledApp() => Registration = null;

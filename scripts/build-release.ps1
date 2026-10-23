@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '0.9.15',
+    [string]$Version = '0.9.16',
     [switch]$Offline
 )
 
