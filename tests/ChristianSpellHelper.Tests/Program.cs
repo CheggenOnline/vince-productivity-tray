@@ -69,6 +69,7 @@ internal static partial class Program
         Run("Updater accepts only approved GitHub release assets", UpdaterRestrictsAssets);
         Run("Updater separates notification from verified installation", UpdaterSeparatesModes);
         Run("Updater detects the newest published prerelease and ignores drafts", UpdaterSelectsPublishedPrerelease);
+        Run("Updater uses a bounded recurring check schedule", UpdaterCheckScheduleIsBounded);
         Run("Updater refuses active recording or unsent time draft", UpdaterRefusesActiveWork);
         Run("Recorder settings preserve folder and park transcription", RecorderSettingsAreSafe);
         Run("Installer validation failure restores previous files", InstallerRollbackRestoresPrevious);
@@ -1008,6 +1009,14 @@ internal static partial class Program
             "An active recording was allowed to update.");
         True(!UpdateInstallGuard.CanInstall(recordingActive: false, timeDraftPending: true),
             "An unsent Time Capture draft was allowed to update.");
+    }
+
+    private static void UpdaterCheckScheduleIsBounded()
+    {
+        Equal(30_000, UpdateCheckSchedule.InitialIntervalMilliseconds);
+        Equal(6 * 60 * 60 * 1000, UpdateCheckSchedule.RepeatIntervalMilliseconds);
+        True(UpdateCheckSchedule.RepeatIntervalMilliseconds > UpdateCheckSchedule.InitialIntervalMilliseconds,
+            "Recurring update checks are unexpectedly more frequent than the initial startup check.");
     }
 
     private static void RecorderSettingsAreSafe()

@@ -59,11 +59,19 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
         RegisterHotkeys();
         _recorder.StatusChanged += (_, _) => UpdateRecorderUi();
         UpdateRecorderUi();
-        _updateTimer = new System.Windows.Forms.Timer { Interval = 30_000 };
+        _updateTimer = new System.Windows.Forms.Timer { Interval = UpdateCheckSchedule.InitialIntervalMilliseconds };
         _updateTimer.Tick += async (_, _) =>
         {
             _updateTimer.Stop();
-            await CheckForUpdatesAsync(manual: false);
+            try
+            {
+                await CheckForUpdatesAsync(manual: false);
+            }
+            finally
+            {
+                _updateTimer.Interval = UpdateCheckSchedule.RepeatIntervalMilliseconds;
+                _updateTimer.Start();
+            }
         };
         _updateTimer.Start();
 
@@ -154,8 +162,10 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
 
     private void RememberAvailableUpdate(UpdateRelease release)
     {
+        var isNew = _availableUpdate?.Version != release.Version;
         _availableUpdate = release;
         _notifyIcon.Text = $"Vince Productivity Tray - update {release.Version} available";
+        if (!isNew) return;
         ShowBalloon($"Update {release.Version} available",
             UpdaterPolicy.IsAutoInstallConfigured
                 ? "Right-click the tray icon and choose Install update when you are ready."

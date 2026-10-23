@@ -356,6 +356,12 @@ internal static class UpdateDeferral
         now.AddHours(Math.Clamp(hours, 1, 168));
 }
 
+internal static class UpdateCheckSchedule
+{
+    public const int InitialIntervalMilliseconds = 30_000;
+    public const int RepeatIntervalMilliseconds = 6 * 60 * 60 * 1000;
+}
+
 internal static class UpdateInstallGuard
 {
     public static bool CanInstall(bool recordingActive, bool timeDraftPending) =>
