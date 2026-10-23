@@ -103,6 +103,10 @@ internal static class Program
         }
 
         ValidatePayload(staging);
+        // Recheck after extraction as well as before prompting. The tray app can be started while
+        // setup is waiting/extracting, and an executable still running from InstallRoot can make
+        // the directory swap fail with a misleading access-denied error.
+        RefuseRunningProcesses();
         InstallTransaction.Commit(
             staging, InstallRoot, rollback, failed, InstallJournalPath,
             () =>
@@ -320,21 +324,49 @@ internal static class Program
 
     private static void RefuseRunningProcesses()
     {
-        var running = Process.GetProcessesByName("VinceProductivityTray")
-            .Concat(Process.GetProcessesByName("ChristianSpellHelper"))
+        var running = Process.GetProcesses()
+            .Where(process => process.Id != Environment.ProcessId)
             .Where(process =>
             {
-                try { return process.Id != Environment.ProcessId && !process.HasExited; }
+                try
+                {
+                    if (process.HasExited) return false;
+                    if (process.ProcessName.Equals("VinceProductivityTray", StringComparison.OrdinalIgnoreCase) ||
+                        process.ProcessName.Equals("ChristianSpellHelper", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                    return IsInstalledApplicationProcessPath(process.MainModule?.FileName, InstallRoot);
+                }
                 catch { return false; }
             })
             .ToArray();
         if (running.Length != 0)
         {
-            throw new InvalidOperationException("A current or legacy tray helper is running. Exit it first; setup will not stop it.");
+            throw new InvalidOperationException(
+                "Vince Productivity Tray or the legacy spell helper is still running. " +
+                "Use Exit from its tray menu, wait for it to close, and then run setup again. " +
+                "Setup will not stop it or risk an active recording or unsaved draft.");
         }
         if (IsLegacyRecorderRunning())
         {
             throw new InvalidOperationException("The legacy MoteOpptak recorder is running. Stop/exit it first; setup will not terminate it.");
+        }
+    }
+
+    internal static bool IsInstalledApplicationProcessPath(string? executablePath, string installRoot)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath) || string.IsNullOrWhiteSpace(installRoot)) return false;
+        try
+        {
+            var fullPath = Path.GetFullPath(executablePath);
+            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(installRoot)) + Path.DirectorySeparatorChar;
+            return fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) &&
+                   Path.GetFileName(fullPath).Equals("VinceProductivityTray.exe", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
         }
     }
 

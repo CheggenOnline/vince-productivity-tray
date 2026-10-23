@@ -75,6 +75,7 @@ internal static partial class Program
         Run("Installer validation failure restores previous files", InstallerRollbackRestoresPrevious);
         Run("Installer recovers an interrupted replacement", InstallerRecoversInterruptedReplacement);
         Run("Installer transaction supports a repeated upgrade", InstallerSupportsRepeatedUpgrade);
+        Run("Installer recognizes its running executable by installed path", InstallerRecognizesRunningExecutablePath);
         Run("Installed apps and Start-menu integration upgrades idempotently", UserShellIntegrationUpgradesIdempotently);
         Run("Shell integration install failure restores prior state", UserShellIntegrationApplyRollsBack);
         Run("Uninstall removes only app-owned shell integration", UserShellIntegrationRemovalIsScoped);
@@ -1017,6 +1018,23 @@ internal static partial class Program
         Equal(6 * 60 * 60 * 1000, UpdateCheckSchedule.RepeatIntervalMilliseconds);
         True(UpdateCheckSchedule.RepeatIntervalMilliseconds > UpdateCheckSchedule.InitialIntervalMilliseconds,
             "Recurring update checks are unexpectedly more frequent than the initial startup check.");
+    }
+
+    private static void InstallerRecognizesRunningExecutablePath()
+    {
+        const string root = @"C:\Users\Example\AppData\Local\Programs\VinceProductivityTray";
+        True(VinceProductivityTray.Setup.Program.IsInstalledApplicationProcessPath(
+                Path.Combine(root, "VinceProductivityTray.exe"), root),
+            "The installed tray executable was not recognized by path.");
+        True(VinceProductivityTray.Setup.Program.IsInstalledApplicationProcessPath(
+                Path.Combine(root.ToUpperInvariant(), "VINCEPRODUCTIVITYTRAY.EXE"), root),
+            "Installed-path process recognition is unexpectedly case-sensitive.");
+        True(!VinceProductivityTray.Setup.Program.IsInstalledApplicationProcessPath(
+                @"C:\Other\VinceProductivityTray.exe", root),
+            "An unrelated executable with the same name was treated as the installed app.");
+        True(!VinceProductivityTray.Setup.Program.IsInstalledApplicationProcessPath(
+                Path.Combine(root, "Uninstall.exe"), root),
+            "The installer/uninstaller process was mistaken for the running tray app.");
     }
 
     private static void RecorderSettingsAreSafe()
