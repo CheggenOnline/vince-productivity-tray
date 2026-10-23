@@ -4,8 +4,8 @@ namespace ChristianSpellHelper;
 
 internal sealed record SettingsActions(
     string Version, Func<string> ApplicationStatus, string SpellcheckStatus,
-    Func<string> UpdateStatus, Func<bool> CanInstallUpdate,
-    Func<Task> CheckForUpdates, Func<Task> InstallUpdate,
+    Func<string> UpdateStatus, string UpdateActionText, Func<bool> CanUseUpdateAction,
+    Func<Task> CheckForUpdates, Func<Task> UseUpdateAction,
     Action OpenNotes, Action OpenRecordings, Action OpenTimeLogs,
     Action OpenDiagnostics);
 
@@ -109,19 +109,28 @@ internal sealed class SettingsForm : Form
         var version = new Label { Text = $"Version: {actions?.Version ?? "development"}", AutoSize = true, Anchor = AnchorStyles.Left };
         c.Controls.Add(version, 0, 1); c.SetColumnSpan(version, 4); Row(c, 1);
         if (actions is not null) version.Text += $"    Status: {actions.ApplicationStatus()}";
-        startup = AddCheckRow(c, 2, "Start with Windows", current.StartWithWindows, "Current user; enabling asks for separate confirmation.");
-        autoUpdate = AddCheckRow(c, 3, "Auto update", current.AutoUpdateEnabled && UpdaterPolicy.IsAutoInstallConfigured,
+        var credit = new Label
+        {
+            Text = "developed by Christian Holberg Heggen",
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            MinimumSize = new Size(420, 32),
+        };
+        Row(c, 2, 48); c.Controls.Add(credit, 0, 2); c.SetColumnSpan(credit, 4);
+        startup = AddCheckRow(c, 3, "Start with Windows", current.StartWithWindows, "Current user; enabling asks for separate confirmation.");
+        autoUpdate = AddCheckRow(c, 4, "Auto update", current.AutoUpdateEnabled && UpdaterPolicy.IsAutoInstallConfigured,
             UpdaterPolicy.IsAutoInstallConfigured ? "Install verified signed updates only while recording and drafts are idle." : "Unavailable until repository and Authenticode publisher are configured.");
         autoUpdate.Enabled = UpdaterPolicy.IsAutoInstallConfigured;
         var status = new Label { Text = actions?.UpdateStatus() ?? "Update integration unavailable in this view.", AutoSize = false, Dock = DockStyle.Fill, ForeColor = SystemColors.GrayText };
-        Row(c, 4, 58); c.Controls.Add(status, 0, 4); c.SetColumnSpan(status, 4);
+        Row(c, 5, 58); c.Controls.Add(status, 0, 5); c.SetColumnSpan(status, 4);
         var updates = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
         var check = new Button { Text = "Check for updates", AutoSize = true, MinimumSize = new Size(150, 36), Enabled = actions is not null };
-        var install = new Button { Text = "Install update", AutoSize = true, MinimumSize = new Size(130, 36), Enabled = actions?.CanInstallUpdate() == true };
-        check.Click += async (_, _) => { if (actions is null) return; await actions.CheckForUpdates(); status.Text = actions.UpdateStatus(); install.Enabled = actions.CanInstallUpdate(); };
-        install.Click += async (_, _) => { if (actions is not null) await actions.InstallUpdate(); };
-        updates.Controls.Add(check); updates.Controls.Add(install); Row(c, 5, 52); c.Controls.Add(updates, 0, 5); c.SetColumnSpan(updates, 4);
-        AddActionRow(c, 6, "Open diagnostics folder", actions?.OpenDiagnostics);
+        var install = new Button { Text = actions?.UpdateActionText ?? "Install update", AutoSize = true, MinimumSize = new Size(150, 36), Enabled = actions?.CanUseUpdateAction() == true };
+        check.Click += async (_, _) => { if (actions is null) return; await actions.CheckForUpdates(); status.Text = actions.UpdateStatus(); install.Enabled = actions.CanUseUpdateAction(); };
+        install.Click += async (_, _) => { if (actions is not null) await actions.UseUpdateAction(); };
+        updates.Controls.Add(check); updates.Controls.Add(install); Row(c, 6, 52); c.Controls.Add(updates, 0, 6); c.SetColumnSpan(updates, 4);
+        AddActionRow(c, 7, "Open diagnostics folder", actions?.OpenDiagnostics);
         page.Controls.Add(c); return page;
     }
 

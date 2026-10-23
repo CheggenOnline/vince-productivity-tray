@@ -229,6 +229,23 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
         }
     }
 
+    private async Task UseAvailableUpdateAsync()
+    {
+        var release = _availableUpdate;
+        if (release is null) return;
+        if (!UpdaterPolicy.IsAutoInstallConfigured)
+        {
+            var releasePage = new Uri(release.ReleasePageUrl);
+            if (!UpdaterPolicy.IsTrustedReleasePageUri(releasePage))
+            {
+                throw new InvalidDataException("The update page is outside the approved GitHub repository.");
+            }
+            Process.Start(new ProcessStartInfo(releasePage.AbsoluteUri) { UseShellExecute = true });
+            return;
+        }
+        await InstallAvailableUpdateAsync();
+    }
+
     private void RegisterHotkeys()
     {
         if (TryApplyHotkeys(_settings, out var conflicts))
@@ -347,9 +364,10 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
             () => _statusItem.Text ?? string.Empty,
             _languageStatus,
             UpdateStatusText,
-            () => _availableUpdate is not null && UpdaterPolicy.IsAutoInstallConfigured,
+            UpdaterPolicy.IsAutoInstallConfigured ? "Install update" : "Open release page",
+            () => _availableUpdate is not null,
             () => CheckForUpdatesAsync(manual: true),
-            () => InstallAvailableUpdateAsync(),
+            () => UseAvailableUpdateAsync(),
             () => OpenFolder(_settings.NotesFolder),
             () => OpenFolder(_settings.RecordingFolder),
             () => OpenFolder(_settings.TimeCaptureFolder),

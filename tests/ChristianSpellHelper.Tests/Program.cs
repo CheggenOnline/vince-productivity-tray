@@ -70,6 +70,7 @@ internal static partial class Program
         Run("Updater separates notification from verified installation", UpdaterSeparatesModes);
         Run("Updater detects the newest published prerelease and ignores drafts", UpdaterSelectsPublishedPrerelease);
         Run("Updater uses a bounded recurring check schedule", UpdaterCheckScheduleIsBounded);
+        Run("Unsigned updater presents an honest release-page action", UnsignedUpdaterActionIsHonest);
         Run("Updater refuses active recording or unsent time draft", UpdaterRefusesActiveWork);
         Run("Recorder settings preserve folder and park transcription", RecorderSettingsAreSafe);
         Run("Installer validation failure restores previous files", InstallerRollbackRestoresPrevious);
@@ -562,6 +563,10 @@ internal static partial class Program
             True(label.Width >= label.PreferredWidth,
                 $"The '{text}' label is clipped horizontally after scaling ({label.Width} < {label.PreferredWidth}).");
         }
+        var credit = Descendants(form).OfType<Label>().Single(label =>
+            label.Text == "developed by Christian Holberg Heggen");
+        True(credit.Width >= credit.PreferredWidth && credit.Height >= credit.PreferredHeight,
+            "The Application developer credit is clipped after DPI scaling.");
     }
 
     private static void CustomerManagerLayeringIsSafe()
@@ -1010,6 +1015,20 @@ internal static partial class Program
             "An active recording was allowed to update.");
         True(!UpdateInstallGuard.CanInstall(recordingActive: false, timeDraftPending: true),
             "An unsent Time Capture draft was allowed to update.");
+    }
+
+    private static void UnsignedUpdaterActionIsHonest()
+    {
+        var actions = new SettingsActions(
+            "0.9.14", () => "Ready", "nb-NO", () => "Version 0.9.15 is available.",
+            "Open release page", () => true, () => Task.CompletedTask, () => Task.CompletedTask,
+            () => { }, () => { }, () => { }, () => { });
+        using var form = new SettingsForm(new AppSettings(), _ =>
+            new HotkeyProbeResult(HotkeyProbeStatus.Available, "Available"), actions);
+        var updateAction = Descendants(form).OfType<Button>().Single(button => button.Text == "Open release page");
+        True(updateAction.Enabled, "The safe manual release-page action is disabled after an update is available.");
+        True(!Descendants(form).OfType<Button>().Any(button => button.Text == "Install update" && button.Enabled),
+            "Unsigned Settings misleadingly offers enabled automatic installation.");
     }
 
     private static void UpdaterCheckScheduleIsBounded()
