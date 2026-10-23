@@ -94,7 +94,7 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
             var release = await client.CheckAsync(_updaterConfig, GitHubUpdateClient.CurrentVersion(), CancellationToken.None);
             if (release is null)
             {
-                if (manual) MessageBox.Show("You already have the latest stable version.", "Vince Productivity Tray");
+                if (manual) MessageBox.Show("You already have the latest published version.", "Vince Productivity Tray");
                 return;
             }
 
@@ -389,7 +389,7 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
 
     private string UpdateStatusText()
     {
-        if (!_updaterConfig.Enabled) return "Update checking is disabled until the official GitHub repository is confirmed.";
+        if (!_updaterConfig.Enabled) return "Update checking is disabled in this build.";
         if (_availableUpdate is null) return "No newer update has been found in this session.";
         return UpdaterPolicy.IsAutoInstallConfigured
             ? $"Version {_availableUpdate.Version} is available and ready for verified installation."

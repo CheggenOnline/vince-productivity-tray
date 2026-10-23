@@ -24,8 +24,8 @@ internal sealed record UpdaterConfig
 internal static class UpdaterPolicy
 {
     public const string ApprovedOwner = "CheggenOnline";
-    // User-approved public distribution repository. Notification remains disabled in updater.json
-    // until an Authenticode publisher is configured and the end-to-end update flow is reverified.
+    // User-approved public distribution repository. Release notification is safe without executing
+    // downloaded code; direct installation remains separately gated by the approved signer below.
     public const string ApprovedRepository = "vince-productivity-tray";
     // Set only after the release installer is Authenticode-signed by the approved publisher.
     public const string ApprovedSignerThumbprint = "";
@@ -124,15 +124,44 @@ internal sealed class GitHubUpdateClient
     public async Task<UpdateRelease?> CheckAsync(UpdaterConfig config, Version current, CancellationToken cancellationToken)
     {
         if (!config.Enabled || !UpdaterPolicy.IsNotificationConfigured) return null;
-        var endpoint = $"https://api.github.com/repos/{UpdaterPolicy.ApprovedOwner}/{UpdaterPolicy.ApprovedRepository}/releases/latest";
+        // The project currently publishes prereleases. GitHub's /releases/latest endpoint excludes
+        // prereleases and returns 404 when no stable release exists, so inspect the bounded release
+        // list and select the highest valid, non-draft version instead.
+        var endpoint = $"https://api.github.com/repos/{UpdaterPolicy.ApprovedOwner}/{UpdaterPolicy.ApprovedRepository}/releases?per_page=20";
         using var response = await _http.GetAsync(endpoint, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        var root = document.RootElement;
-        var tag = root.GetProperty("tag_name").GetString()?.TrimStart('v')
-            ?? throw new InvalidDataException("The release has no version tag.");
-        if (!Version.TryParse(tag, out var version) || version <= current) return null;
+        var rid = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "win-arm64" : "win-x64";
+        return SelectLatest(document.RootElement, current, rid);
+    }
+
+    internal static UpdateRelease? SelectLatest(JsonElement releases, Version current, string rid)
+    {
+        if (releases.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("The GitHub releases response is not an array.");
+        }
+
+        JsonElement? selected = null;
+        Version? selectedVersion = null;
+        foreach (var candidate in releases.EnumerateArray())
+        {
+            if (candidate.TryGetProperty("draft", out var draft) && draft.GetBoolean()) continue;
+            var candidateTag = candidate.GetProperty("tag_name").GetString()?.TrimStart('v', 'V');
+            if (!Version.TryParse(candidateTag, out var candidateVersion) ||
+                candidateVersion <= current ||
+                selectedVersion is not null && candidateVersion <= selectedVersion)
+            {
+                continue;
+            }
+            selected = candidate.Clone();
+            selectedVersion = candidateVersion;
+        }
+
+        if (selected is null || selectedVersion is null) return null;
+        var root = selected.Value;
+        var version = selectedVersion;
         var releasePageUrl = root.GetProperty("html_url").GetString()
             ?? throw new InvalidDataException("The release has no official page.");
         if (!UpdaterPolicy.IsTrustedReleasePageUri(new Uri(releasePageUrl)))
@@ -140,7 +169,6 @@ internal sealed class GitHubUpdateClient
             throw new InvalidDataException("The release page is outside the approved GitHub repository.");
         }
 
-        var rid = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "win-arm64" : "win-x64";
         var installer = $"VinceProductivityTray-{version}-{rid}-Setup.exe";
         var checksum = installer + ".sha256";
         string? installerUrl = null;

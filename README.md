@@ -9,7 +9,7 @@ The recorder runtime is packaged from the supplied `MoteOpptak` source: PowerShe
 Requirements: Windows, .NET 9 SDK, and access to official NuGet runtime packs.
 
 ```powershell
-.\scripts\build-release.ps1 -Version 0.9.12
+.\scripts\build-release.ps1 -Version 0.9.13
 ```
 
 The script creates version-scoped self-contained ARM64 and x64 application folders, payloads, installers, SHA-256 sidecars, and JSON manifests under `artifacts\release`. It fails closed if the PE architecture is wrong, recorder assets are missing, or debug symbols/parked transcription binaries enter a payload. ARM64 core tests run separately; x64 remains cross-built and must not be described as runtime-tested on this ARM64 host.
@@ -20,4 +20,4 @@ Development did not start a recorder, access a microphone, restore quarantined f
 
 Release payloads contain no personal profile, credential, note, recording, transcription model, customer data, or API key. The demo installers are unsigned, so SmartScreen and enterprise application control may warn or block them. The public release source is pinned to `CheggenOnline/vince-productivity-tray`, but update checking and installation remain disabled until an Authenticode publisher certificate is configured. Nothing installs automatically.
 
-The 0.9.12 source is a development candidate. It has not been installed or launched normally. See `docs/DEVELOPMENT-STATUS-0.9.12.md` for the latest bounded-test status.
+Version 0.9.12 is installed on the development PC. The 0.9.13 source is a bounded update-notification candidate and has not been installed or launched normally. See `docs/DEVELOPMENT-STATUS-0.9.13.md` for the latest status.

@@ -68,6 +68,7 @@ internal static partial class Program
         Run("Deferred updates honor cooldown", DeferredUpdatesHonorCooldown);
         Run("Updater accepts only approved GitHub release assets", UpdaterRestrictsAssets);
         Run("Updater separates notification from verified installation", UpdaterSeparatesModes);
+        Run("Updater detects the newest published prerelease and ignores drafts", UpdaterSelectsPublishedPrerelease);
         Run("Updater refuses active recording or unsent time draft", UpdaterRefusesActiveWork);
         Run("Recorder settings preserve folder and park transcription", RecorderSettingsAreSafe);
         Run("Installer validation failure restores previous files", InstallerRollbackRestoresPrevious);
@@ -957,6 +958,46 @@ internal static partial class Program
         True(!UpdaterPolicy.IsTrustedReleasePageUri(
             new Uri("https://github.com/CheggenOnline/other/releases/tag/v1.0.0")),
             "A different repository release page was accepted.");
+    }
+
+    private static void UpdaterSelectsPublishedPrerelease()
+    {
+        const string json = """
+        [
+          {
+            "tag_name": "v0.9.14",
+            "draft": true,
+            "prerelease": true,
+            "html_url": "https://github.com/CheggenOnline/vince-productivity-tray/releases/tag/v0.9.14",
+            "body": "draft",
+            "assets": []
+          },
+          {
+            "tag_name": "v0.9.13",
+            "draft": false,
+            "prerelease": true,
+            "html_url": "https://github.com/CheggenOnline/vince-productivity-tray/releases/tag/v0.9.13",
+            "body": "published prerelease",
+            "assets": []
+          },
+          {
+            "tag_name": "v0.9.12",
+            "draft": false,
+            "prerelease": true,
+            "html_url": "https://github.com/CheggenOnline/vince-productivity-tray/releases/tag/v0.9.12",
+            "body": "current",
+            "assets": []
+          }
+        ]
+        """;
+        using var document = JsonDocument.Parse(json);
+        var update = GitHubUpdateClient.SelectLatest(document.RootElement, new Version(0, 9, 12), "win-arm64");
+        Equal(new Version(0, 9, 13), update?.Version);
+        Equal("published prerelease", update?.ReleaseNotes);
+        True(!UpdaterPolicy.IsAutoInstallConfigured,
+            "Prerelease discovery unexpectedly weakened the Authenticode installation gate.");
+        True(GitHubUpdateClient.SelectLatest(document.RootElement, new Version(0, 9, 13), "win-arm64") is null,
+            "The updater offered a draft or an already installed release.");
     }
 
     private static void UpdaterRefusesActiveWork()
