@@ -15,4 +15,4 @@ The ARM64 core suite passed 70/70 checks with zero compilation warnings/errors. 
 
 ARM64/x64 installers are prepared with the existing architecture/hash checks and refreshed into distribution. No installer, real popup, tray app, registry startup write or recording was run on the development PC for this change. Real first-install/upgrade validation remains pending, and x64 is not locally runtime-tested.
 
-Publication is authorized for this completed and locally verified version. Pushing the new release notes to `main` triggers the existing GitHub Actions workflow; it publishes the prerelease only if its checks, both architecture builds, and all asset uploads succeed. Publishing does not install or run the app on the development PC.
+Version 0.9.16 was published as a GitHub prerelease on 2026-10-23 from commit `d24dc7755f7c207c368ce70255bb3f554a61d6b9`. GitHub Actions completed the synthetic checks, both architecture builds, and all nine asset uploads successfully. Publication did not install or run the app on the development PC.
