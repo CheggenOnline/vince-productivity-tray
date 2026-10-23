@@ -15,6 +15,8 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
     private readonly HotkeyWindow _hotkeys = new();
     private readonly SelectionTransaction _selectionTransaction;
     private readonly QuickNoteForm _quickNote;
+    private readonly QuickNoteCapture _quickNoteCapture;
+    private readonly QuickNoteNotification _quickNoteNotification = new();
     private readonly TimeCaptureController _timeCapture;
     private readonly IRecorderController _recorder;
     private readonly HttpClient _updateHttp = new();
@@ -24,6 +26,7 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
     private AppSettings _settings;
     private UpdateRelease? _availableUpdate;
     private int _operationActive;
+    private bool _downloadActive;
 
     public SpellHelperApplicationContext(
         ConservativeCorrectionEngine engine,
@@ -33,7 +36,11 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
         _settings = AppSettings.Load() with { StartWithWindows = StartupManager.IsEnabled() };
         _selectionTransaction = new SelectionTransaction(engine);
         _recorder = recorder;
-        _quickNote = new QuickNoteForm(new DailyNoteWriter(), () => _settings);
+        var noteWriter = new DailyNoteWriter();
+        _quickNote = new QuickNoteForm(noteWriter, () => _settings);
+        _quickNoteCapture = new QuickNoteCapture(noteWriter, () => _settings,
+            () => QuickNoteSelectionReader.Read(HotkeyDefinition.Parse(_settings.NotesHotkey)),
+            _quickNote.ShowForEntry, _quickNoteNotification.ShowMessage);
         _timeCapture = new TimeCaptureController(() => _settings);
         _languageStatus = BuildLanguageText(engine.LanguageCandidates, allInstalledLanguages);
 
@@ -50,7 +57,7 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
         _notifyIcon = new NotifyIcon
         {
             Icon = _trayIcon,
-            Text = "Vince Productivity Tray",
+            Text = GitHubUpdateClient.CurrentVersion().ToString(3),
             Visible = true,
             ContextMenuStrip = menu,
         };
@@ -125,11 +132,11 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
             {
                 if (!manual) return;
                 var open = MessageBox.Show(
-                    $"Version {release.Version} is available.\n\n{notes}\n\nOpen the official GitHub release page to download it manually?",
+                    $"Version {release.Version} is available.\n\n{notes}\n\nDownload the installer for this PC? You will start setup yourself.",
                     "Vince Productivity Tray update", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
                 if (open == DialogResult.Yes)
                 {
-                    Process.Start(new ProcessStartInfo(release.ReleasePageUrl) { UseShellExecute = true });
+                    await UseAvailableUpdateAsync();
                 }
                 else
                 {
@@ -164,12 +171,11 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
     {
         var isNew = _availableUpdate?.Version != release.Version;
         _availableUpdate = release;
-        _notifyIcon.Text = $"Vince Productivity Tray - update {release.Version} available";
         if (!isNew) return;
         ShowBalloon($"Update {release.Version} available",
             UpdaterPolicy.IsAutoInstallConfigured
                 ? "Right-click the tray icon and choose Install update when you are ready."
-                : "The signed automatic installer is not configured; use the official release page.",
+                : "Open Settings and choose Download update. You start the installer yourself.",
             ToolTipIcon.Info);
     }
 
@@ -235,12 +241,27 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
         if (release is null) return;
         if (!UpdaterPolicy.IsAutoInstallConfigured)
         {
-            var releasePage = new Uri(release.ReleasePageUrl);
-            if (!UpdaterPolicy.IsTrustedReleasePageUri(releasePage))
+            if (_downloadActive) return;
+            _downloadActive = true;
+            try
             {
-                throw new InvalidDataException("The update page is outside the approved GitHub repository.");
+                var client = new GitHubUpdateClient(_updateHttp);
+                var path = await client.DownloadVerifiedAsync(release, CancellationToken.None);
+                var openFolder = MessageBox.Show(
+                    $"Version {release.Version} was downloaded and its SHA-256 checksum matches.\n\n" +
+                    $"{path}\n\nOpen the download folder? Save your drafts, stop recording and use Exit before starting setup. " +
+                    "This installer is unsigned; Windows or company policy may show a warning or block it.",
+                    "Update downloaded", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                if (openFolder == DialogResult.Yes)
+                    Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
             }
-            Process.Start(new ProcessStartInfo(releasePage.AbsoluteUri) { UseShellExecute = true });
+            catch (Exception exception)
+            {
+                LocalLog.Write("Update download failed", exception);
+                MessageBox.Show($"The update was not downloaded.\n\n{exception.Message}",
+                    "Vince Productivity Tray", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally { _downloadActive = false; }
             return;
         }
         await InstallAvailableUpdateAsync();
@@ -267,7 +288,7 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
             if (settings.SpellcheckEnabled)
                 bindings.Add(new(HotkeyDefinition.Parse(settings.SpellcheckHotkey), HandleSpellcheck, "Spellcheck"));
             if (settings.QuickNotesEnabled)
-                bindings.Add(new(HotkeyDefinition.Parse(settings.NotesHotkey), _quickNote.ShowForEntry, "Quick note"));
+                bindings.Add(new(HotkeyDefinition.Parse(settings.NotesHotkey), HandleQuickNote, "Quick note"));
             if (settings.RecordingEnabled && _recorder.IsAvailable)
                 bindings.Add(new(HotkeyDefinition.Parse(settings.RecordingHotkey), ToggleRecording, "Recording"));
             if (settings.TimeCaptureEnabled)
@@ -280,6 +301,13 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
         }
 
         return _hotkeys.TryReplaceAll(bindings, out conflicts);
+    }
+
+    private void HandleQuickNote()
+    {
+        if (!_settings.QuickNotesEnabled || Interlocked.Exchange(ref _operationActive, 1) != 0) return;
+        try { _quickNoteCapture.Capture(); }
+        finally { Volatile.Write(ref _operationActive, 0); }
     }
 
     private void HandleSpellcheck()
@@ -364,8 +392,8 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
             () => _statusItem.Text ?? string.Empty,
             _languageStatus,
             UpdateStatusText,
-            UpdaterPolicy.IsAutoInstallConfigured ? "Install update" : "Open release page",
-            () => _availableUpdate is not null,
+            UpdaterPolicy.IsAutoInstallConfigured ? "Install update" : "Download update",
+            () => !_downloadActive && _availableUpdate is { InstallerUrl: not null, ChecksumUrl: not null },
             () => CheckForUpdatesAsync(manual: true),
             () => UseAvailableUpdateAsync(),
             () => OpenFolder(_settings.NotesFolder),
@@ -407,6 +435,7 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
             }
             SetStatus($"Ready - notes {_settings.NotesHotkey}, spellcheck {_settings.SpellcheckHotkey}", false);
             UpdateRecorderUi();
+            _timeCapture.RefreshSettings();
         }
         catch (Exception exception)
         {
@@ -421,13 +450,12 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
         if (_availableUpdate is null) return "No newer update has been found in this session.";
         return UpdaterPolicy.IsAutoInstallConfigured
             ? $"Version {_availableUpdate.Version} is available and ready for verified installation."
-            : $"Version {_availableUpdate.Version} is available, but direct installation requires an approved Authenticode publisher.";
+            : $"Version {_availableUpdate.Version} is available. Download the installer for this PC and start setup manually.";
     }
 
     private void SetStatus(string status, bool notify, ToolTipIcon icon = ToolTipIcon.Info, string? detail = null)
     {
         _statusItem.Text = status;
-        _notifyIcon.Text = status.Length <= 63 ? status : status[..63];
         if (notify) ShowBalloon("Vince Productivity Tray", detail ?? status, icon);
     }
 
@@ -462,6 +490,7 @@ internal sealed class SpellHelperApplicationContext : ApplicationContext
         _updateHttp.Dispose();
         _recorder.Dispose();
         _quickNote.Dispose();
+        _quickNoteNotification.Dispose();
         _timeCapture.Dispose();
         _hotkeys.Dispose();
         _notifyIcon.Visible = false;

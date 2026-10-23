@@ -11,6 +11,9 @@ internal sealed class TimeCaptureForm : Form
     private readonly ComboBox _customer = new() { DropDownStyle = ComboBoxStyle.DropDown, Width = 322 };
     private readonly Label _progress = new() { AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
     private readonly Button _snoozeButton = new() { Text = "Snooze", AutoSize = true };
+    private readonly TableLayoutPanel _table;
+    private readonly Label _customerLabel;
+    private readonly FlowLayoutPanel _customerPanel;
     private bool _saving;
 
     public TimeCaptureForm(TimeCaptureStore store, Func<AppSettings> settings)
@@ -23,13 +26,14 @@ internal sealed class TimeCaptureForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         KeyPreview = true;
-        Font = new Font(SystemFonts.MessageBoxFont?.FontFamily ?? SystemFonts.DefaultFont.FontFamily, 10f);
-        MinimumSize = new Size(420, 430);
-        ClientSize = new Size(440, 440);
+        Font = new Font(SystemFonts.MessageBoxFont?.FontFamily ?? SystemFonts.DefaultFont.FontFamily, 10f, FontStyle.Regular);
+        MinimumSize = new Size(660, 430);
+        ClientSize = new Size(680, 440);
         _duration.Items.AddRange(["0.5", "1", "2", "3", "4", "5", "6", "7", "8"]);
         _duration.SelectedItem = "1";
 
         var table = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 9 };
+        _table = table;
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
@@ -41,20 +45,21 @@ internal sealed class TimeCaptureForm : Form
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         table.Controls.Add(new Label { Text = "Relative Progress:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
-        _progress.Font = new Font(Font, FontStyle.Bold);
         table.Controls.Add(_progress, 0, 1);
         table.Controls.Add(new Label { Text = "What are you working on right now?", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
         table.Controls.Add(_entry, 0, 3);
         table.Controls.Add(new Label { Text = "Duration (hours):", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 4);
         table.Controls.Add(_duration, 0, 5);
-        table.Controls.Add(new Label { Text = "Customer:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 6);
+        _customerLabel = new Label { Text = "Customer:", AutoSize = true, Anchor = AnchorStyles.Left };
+        table.Controls.Add(_customerLabel, 0, 6);
         var customerPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 3, 0, 3) };
+        _customerPanel = customerPanel;
         customerPanel.Controls.Add(_customer);
         var manage = new Button { Text = "⚙", Width = 38, Height = 30, AccessibleName = "Manage customers" };
         manage.Click += (_, _) => ManageCustomers();
         customerPanel.Controls.Add(manage);
         table.Controls.Add(customerPanel, 0, 7);
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = new Padding(0, 12, 0, 0) };
+        var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
         var submit = new Button { Text = "Submit", Width = 100, Height = 34 };
         var cancel = new Button { Text = "Hide", Width = 76, Height = 34 };
         submit.Click += (_, _) => TrySave();
@@ -62,7 +67,9 @@ internal sealed class TimeCaptureForm : Form
         cancel.Click += (_, _) => Hide();
         _snoozeButton.Height = 34;
         buttons.Controls.Add(submit); buttons.Controls.Add(_snoozeButton); buttons.Controls.Add(cancel);
-        table.Controls.Add(buttons, 0, 8);
+        var footer = ApplicationFooter.Create(buttons);
+        footer.Dock = DockStyle.Bottom;
+        table.Controls.Add(footer, 0, 8);
         Controls.Add(table);
         AcceptButton = submit;
         KeyDown += (_, eventArgs) => { if (eventArgs.KeyCode == Keys.Escape) { eventArgs.Handled = true; Hide(); } };
@@ -81,12 +88,18 @@ internal sealed class TimeCaptureForm : Form
         _entry.Focus();
     }
 
-    private void RefreshFromDisk()
+    internal void RefreshFromDisk()
     {
         var settings = _settings();
+        _customerLabel.Visible = settings.TimeCaptureUseCustomerList;
+        _customerPanel.Visible = settings.TimeCaptureUseCustomerList;
+        _table.RowStyles[6].SizeType = settings.TimeCaptureUseCustomerList ? SizeType.AutoSize : SizeType.Absolute;
+        _table.RowStyles[6].Height = 0;
+        _table.RowStyles[7].Height = settings.TimeCaptureUseCustomerList ? 42 : 0;
         var selected = _customer.Text;
         _customer.Items.Clear();
-        _customer.Items.AddRange(_store.LoadCustomers(settings.TimeCaptureFolder).Cast<object>().ToArray());
+        if (settings.TimeCaptureUseCustomerList)
+            _customer.Items.AddRange(_store.LoadCustomers(settings.TimeCaptureFolder).Cast<object>().ToArray());
         if (selected.Length != 0) _customer.Text = selected;
         else if (_customer.Items.Count != 0) _customer.SelectedIndex = 0;
         _snoozeButton.Text = $"Snooze {settings.TimeCaptureSnoozeMinutes} min";
@@ -105,7 +118,9 @@ internal sealed class TimeCaptureForm : Form
         try
         {
             var duration = decimal.Parse(_duration.Text, CultureInfo.InvariantCulture);
-            _store.Append(_settings().TimeCaptureFolder, _entry.Text, duration, _customer.Text, DateTimeOffset.Now);
+            var settings = _settings();
+            _store.Append(settings.TimeCaptureFolder, _entry.Text, duration,
+                settings.TimeCaptureUseCustomerList ? _customer.Text : string.Empty, DateTimeOffset.Now);
             _entry.Clear();
             Hide();
         }
@@ -163,7 +178,7 @@ internal sealed class CustomerManagerForm : Form
     {
         _store = store; _folder = folder;
         Text = "Customers";
-        Width = 490; Height = 390; MinimumSize = new Size(450, 340);
+        Width = 660; Height = 390; MinimumSize = new Size(640, 340);
         StartPosition = FormStartPosition.CenterParent;
         ShowInTaskbar = false;
         Font = new Font(SystemFonts.MessageBoxFont?.FontFamily ?? SystemFonts.DefaultFont.FontFamily, 10f);
@@ -191,7 +206,8 @@ internal sealed class CustomerManagerForm : Form
         remove.Click += (_, _) => { if (_customers.SelectedIndex >= 0) _customers.Items.RemoveAt(_customers.SelectedIndex); };
         close.Click += (_, _) => Close();
         buttons.Controls.Add(close); buttons.Controls.Add(save); buttons.Controls.Add(remove);
-        table.Controls.Add(buttons, 0, 4); table.SetColumnSpan(buttons, 2);
+        var footer = ApplicationFooter.Create(buttons);
+        table.Controls.Add(footer, 0, 4); table.SetColumnSpan(footer, 2);
         Controls.Add(table);
         AcceptButton = add;
         Shown += (_, _) => { Activate(); _newCustomer.Focus(); };

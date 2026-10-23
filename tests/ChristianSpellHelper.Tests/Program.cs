@@ -38,6 +38,11 @@ internal static partial class Program
         Run("Quick notes use local date at save time", QuickNotesUseSaveDate);
         Run("Quick notes serialize repeated appends", QuickNotesSerializeAppends);
         Run("Quick note close hides and can reopen", QuickNoteCloseHidesAndReopens);
+        Run("Selected quick note saves without opening or replacing a draft", SelectedQuickNotePreservesDraft);
+        Run("Quick note selection refuses passwords, changed focus, and truncated text", QuickNoteSelectionBoundaries);
+        Run("Empty or unavailable selection opens the editor without saving", QuickNoteSelectionFallback);
+        Run("Selected quick note reports storage failure without success", SelectedQuickNoteSaveFailure);
+        Run("Application windows share a visible footer at normal and scaled sizes", ApplicationWindowsHaveFooter);
         Run("Hotkey parser supports configured defaults", HotkeyDefaultsParse);
         Run("Hotkeys rebind immediately after settings save", HotkeysRebindTransactionally);
         Run("Failed hotkey rebind restores previous bindings", FailedHotkeyRebindRestoresPrevious);
@@ -52,6 +57,7 @@ internal static partial class Program
         Run("Time capture progress matches legacy half-hour rules", TimeCaptureProgressMatchesLegacyRules);
         Run("Time capture schedule suppresses duplicate popups", TimeCaptureScheduleSuppressesDuplicates);
         Run("Time capture layout matches compact original flow", TimeCaptureLayoutMatchesOriginal);
+        Run("Time capture customer toggle hides and omits customers without losing the list", TimeCaptureCustomerToggle);
         Run("Customer manager stays above its modal owner", CustomerManagerLayeringIsSafe);
         Run("Meeting autorecord requires an enabled rising edge", MeetingAutorecordRequiresRisingEdge);
         Run("Settings controls remain visible after DPI scaling", SettingsControlsRemainVisible);
@@ -71,6 +77,7 @@ internal static partial class Program
         Run("Updater detects the newest published prerelease and ignores drafts", UpdaterSelectsPublishedPrerelease);
         Run("Updater uses a bounded recurring check schedule", UpdaterCheckScheduleIsBounded);
         Run("Unsigned updater presents an honest release-page action", UnsignedUpdaterActionIsHonest);
+        Run("Unsigned download verifies checksums without running setup", UnsignedDownloadVerifiesIntegrity);
         Run("Updater refuses active recording or unsent time draft", UpdaterRefusesActiveWork);
         Run("Recorder settings preserve folder and park transcription", RecorderSettingsAreSafe);
         Run("Installer validation failure restores previous files", InstallerRollbackRestoresPrevious);
@@ -164,6 +171,108 @@ internal static partial class Program
         }
 
         return Failed.Count == 0 ? 0 : 1;
+    }
+
+    private static void QuickNoteSelectionBoundaries()
+    {
+        var identity = new SelectionIdentity(new IntPtr(1), new IntPtr(2), "Edit", "synthetic", "selected", false);
+        Equal(NoteSelectionStatus.Selected, QuickNoteSelectionReader.Inspect(identity, identity).Status);
+        foreach (var changed in new[]
+        {
+            identity with { ForegroundWindow = new IntPtr(3) },
+            identity with { FocusWindow = new IntPtr(4) },
+            identity with { IsPassword = true },
+            identity with { AutomationSelectedText = "different" },
+            identity with { AutomationSelectedText = null },
+            identity with { AutomationSelectedText = new string('x', 20_001) },
+        })
+            Equal(NoteSelectionStatus.Unavailable, QuickNoteSelectionReader.Inspect(identity, changed).Status);
+        var empty = identity with { AutomationSelectedText = "" };
+        Equal(NoteSelectionStatus.Empty, QuickNoteSelectionReader.Inspect(empty, empty).Status);
+        var password = identity with { IsPassword = true };
+        Equal(NoteSelectionStatus.Unavailable, QuickNoteSelectionReader.Inspect(password, password).Status);
+        var longText = identity with { AutomationSelectedText = new string('x', 20_001) };
+        Equal(NoteSelectionStatus.Unavailable, QuickNoteSelectionReader.Inspect(longText, longText).Status);
+    }
+
+    private static void SelectedQuickNotePreservesDraft()
+    {
+        var folder = NewNoteFolder();
+        var settings = new AppSettings { NotesFolder = folder };
+        using var form = new QuickNoteForm(new DailyNoteWriter(), () => settings);
+        var input = Descendants(form).OfType<TextBox>().Single();
+        input.Text = "existing unsent draft";
+        var notifications = new List<string>();
+        var opened = 0;
+        var capture = new QuickNoteCapture(new DailyNoteWriter(), () => settings,
+            () => new(NoteSelectionStatus.Selected, "Selected æøå\nsecond line"), () => opened++, notifications.Add);
+        capture.Capture();
+        Equal(0, opened);
+        Equal("existing unsent draft", input.Text);
+        True(!form.Visible, "Selection capture opened the editor.");
+        var saved = Directory.GetFiles(folder, "*.txt").Single();
+        True(File.ReadAllText(saved, Encoding.UTF8).Contains("Selected æøå\nsecond line", StringComparison.Ordinal),
+            "Selection text was not saved intact.");
+        True(notifications.Single().Contains("added", StringComparison.Ordinal), "Missing successful-save notification.");
+    }
+
+    private static void QuickNoteSelectionFallback()
+    {
+        var folder = NewNoteFolder();
+        var opened = 0;
+        var notifications = new List<string>();
+        foreach (var status in new[] { NoteSelectionStatus.Empty, NoteSelectionStatus.Unavailable })
+        {
+            var capture = new QuickNoteCapture(new DailyNoteWriter(), () => new AppSettings { NotesFolder = folder },
+                () => new(status), () => opened++, notifications.Add);
+            capture.Capture();
+        }
+        Equal(2, opened);
+        Equal(0, Directory.GetFiles(folder, "*.txt").Length);
+        True(notifications.Count == 1 && !notifications[0].Contains("added", StringComparison.Ordinal),
+            "Fallback incorrectly confirmed a save.");
+    }
+
+    private static void SelectedQuickNoteSaveFailure()
+    {
+        var folder = NewNoteFolder();
+        var blocker = Path.Combine(folder, "not-a-directory");
+        File.WriteAllText(blocker, "synthetic blocker");
+        var notifications = new List<string>();
+        var capture = new QuickNoteCapture(new DailyNoteWriter(), () => new AppSettings { NotesFolder = blocker },
+            () => new(NoteSelectionStatus.Selected, "synthetic selection"),
+            () => throw new InvalidOperationException("Editor should stay closed"), notifications.Add, _ => { });
+        capture.Capture();
+        True(notifications.Single().Contains("could not be saved", StringComparison.Ordinal),
+            "A failed save was reported as successful.");
+    }
+
+    private static void ApplicationWindowsHaveFooter()
+    {
+        var folder = NewNoteFolder();
+        using var settings = new SettingsForm(new AppSettings(), _ => new(HotkeyProbeStatus.Available, "Available"));
+        using var note = new QuickNoteForm(new DailyNoteWriter(), () => new AppSettings());
+        using var time = new TimeCaptureForm(new TimeCaptureStore(), () => new AppSettings());
+        using var customers = new CustomerManagerForm(new TimeCaptureStore(), folder);
+        foreach (var form in new Form[] { settings, note, time, customers })
+        {
+            form.StartPosition = FormStartPosition.Manual;
+            form.Location = new Point(-10000, -10000);
+            form.Show();
+            foreach (var scale in new[] { 1f, 1.5f })
+            {
+                if (scale != 1f) form.Scale(new SizeF(scale, scale));
+                form.PerformLayout(); Application.DoEvents();
+                var credit = Descendants(form).OfType<Label>().Single(label => label.Text == ApplicationFooter.Credit);
+                True(credit.Visible && credit.Font.SizeInPoints < form.Font.SizeInPoints,
+                    $"Footer is missing or not smaller in {form.Text}.");
+                var bounds = form.RectangleToClient(credit.RectangleToScreen(credit.ClientRectangle));
+                True(form.ClientRectangle.Contains(bounds), $"Footer is outside {form.Text}: credit {bounds}, client {form.ClientRectangle}, scale {scale}.");
+                var siblings = credit.Parent!.Controls.Cast<Control>().Where(control => control != credit);
+                True(siblings.All(control => !credit.Bounds.IntersectsWith(control.Bounds)), $"Footer actions overlap credit in {form.Text}.");
+            }
+            form.Hide();
+        }
     }
 
     private static void ProtectUrl()
@@ -459,6 +568,41 @@ internal static partial class Program
         True(state.ShouldTrigger(new DateTime(2026, 10, 22, 9, 0, 1), 8, 16), "Next-hour popup was missed.");
     }
 
+    private static void TimeCaptureCustomerToggle()
+    {
+        var folder = NewNoteFolder();
+        var store = new TimeCaptureStore();
+        store.SaveCustomers(folder, ["Synthetic customer"]);
+        var settings = new AppSettings { TimeCaptureFolder = folder, TimeCaptureUseCustomerList = true };
+        using var form = new TimeCaptureForm(store, () => settings);
+        form.StartPosition = FormStartPosition.Manual;
+        form.Location = new Point(-10000, -10000);
+        form.ShowForEntry();
+        var customer = Descendants(form).OfType<ComboBox>().Single(combo => combo.DropDownStyle == ComboBoxStyle.DropDown);
+        True(customer.Visible, "Customer dropdown is missing when enabled.");
+        settings = settings with { TimeCaptureUseCustomerList = false };
+        form.RefreshFromDisk();
+        True(!customer.Visible && !Descendants(form).OfType<Button>().Single(button => button.AccessibleName == "Manage customers").Visible,
+            "Customer controls remain visible when disabled.");
+        True(Descendants(form).OfType<Label>().All(label => !label.Font.Bold), "Popup text is still bold.");
+        Descendants(form).OfType<TextBox>().Single(text => text.Multiline).Text = "Synthetic work without customer";
+        Descendants(form).OfType<Button>().Single(button => button.Text == "Submit").PerformClick();
+        var log = Directory.GetFiles(folder, "log_*.txt").Single();
+        True(!File.ReadAllText(log).Contains("cust=", StringComparison.Ordinal), "Hidden customer leaked into the time entry.");
+        Equal("Synthetic customer", store.LoadCustomers(folder).Single());
+        settings = settings with { TimeCaptureUseCustomerList = true };
+        form.ShowForEntry();
+        True(customer.Visible && customer.Items.Count == 1, "Customer list did not return when re-enabled.");
+        form.Hide();
+        using var settingsForm = new SettingsForm(settings, _ => new(HotkeyProbeStatus.Available, "Available"));
+        var toggle = Descendants(settingsForm).OfType<CheckBox>().Single(check => check.Text == "Show customer selection in the popup.");
+        toggle.Checked = false;
+        True(!settingsForm.GetSettings().TimeCaptureUseCustomerList, "Customer toggle was not returned from Settings.");
+        var json = JsonSerializer.Serialize(settingsForm.GetSettings());
+        True(JsonSerializer.Deserialize<AppSettings>(json)?.TimeCaptureUseCustomerList == false, "Customer toggle did not persist.");
+        True(JsonSerializer.Deserialize<AppSettings>("{}")!.TimeCaptureUseCustomerList, "Older settings lost the customer list default.");
+    }
+
     private static void TimeCaptureLayoutMatchesOriginal()
     {
         var folder = NewNoteFolder();
@@ -468,7 +612,7 @@ internal static partial class Program
             TimeCaptureSnoozeMinutes = 10,
         });
         form.PerformLayout();
-        True(form.ClientSize.Width is >= 420 and <= 480, "Time capture window is no longer compact.");
+        True(form.ClientSize.Width is >= 640 and <= 720, "Time capture must fit the shared credit and action footer.");
         var controls = Descendants(form).ToArray();
         var labels = controls.OfType<Label>().Select(label => label.Text).ToArray();
         True(labels.Contains("Relative Progress:") && labels.Contains("What are you working on right now?") &&
@@ -564,7 +708,7 @@ internal static partial class Program
                 $"The '{text}' label is clipped horizontally after scaling ({label.Width} < {label.PreferredWidth}).");
         }
         var credit = Descendants(form).OfType<Label>().Single(label =>
-            label.Text == "developed by Christian Holberg Heggen");
+            label.Text == ApplicationFooter.Credit);
         True(credit.Width >= credit.PreferredWidth && credit.Height >= credit.PreferredHeight,
             "The Application developer credit is clipped after DPI scaling.");
     }
@@ -958,6 +1102,7 @@ internal static partial class Program
     private static void UpdaterSeparatesModes()
     {
         True(UpdaterPolicy.IsNotificationConfigured, "Approved public release notification policy is missing.");
+        True(UpdaterPolicy.IsManualDownloadConfigured, "Unsigned downloads must not require publisher signing.");
         True(!UpdaterPolicy.IsAutoInstallConfigured, "Unsigned development candidate unexpectedly enabled installer execution.");
         True(UpdaterPolicy.IsTrustedReleasePageUri(
             new Uri("https://github.com/CheggenOnline/vince-productivity-tray/releases/tag/v1.0.0")),
@@ -1021,14 +1166,59 @@ internal static partial class Program
     {
         var actions = new SettingsActions(
             "0.9.14", () => "Ready", "nb-NO", () => "Version 0.9.15 is available.",
-            "Open release page", () => true, () => Task.CompletedTask, () => Task.CompletedTask,
+            "Download update", () => true, () => Task.CompletedTask, () => Task.CompletedTask,
             () => { }, () => { }, () => { }, () => { });
         using var form = new SettingsForm(new AppSettings(), _ =>
             new HotkeyProbeResult(HotkeyProbeStatus.Available, "Available"), actions);
-        var updateAction = Descendants(form).OfType<Button>().Single(button => button.Text == "Open release page");
+        var updateAction = Descendants(form).OfType<Button>().Single(button => button.Text == "Download update");
         True(updateAction.Enabled, "The safe manual release-page action is disabled after an update is available.");
         True(!Descendants(form).OfType<Button>().Any(button => button.Text == "Install update" && button.Enabled),
             "Unsigned Settings misleadingly offers enabled automatic installation.");
+    }
+
+    private sealed class DownloadTestHandler : System.Net.Http.HttpMessageHandler
+    {
+        public bool WrongHash { get; set; }
+        public byte[] Payload { get; } = Encoding.UTF8.GetBytes("synthetic installer; never executable");
+        protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(
+            System.Net.Http.HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK);
+            response.Content = request.RequestUri!.AbsolutePath.EndsWith(".sha256", StringComparison.Ordinal)
+                ? new System.Net.Http.StringContent(WrongHash ? new string('0', 64) :
+                    Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Payload)))
+                : new System.Net.Http.ByteArrayContent(Payload);
+            return Task.FromResult(response);
+        }
+    }
+
+    private static void UnsignedDownloadVerifiesIntegrity()
+    {
+        Task.Run(async () =>
+        {
+            var folder = NewNoteFolder();
+            using var handler = new DownloadTestHandler();
+            using var http = new System.Net.Http.HttpClient(handler);
+            var client = new GitHubUpdateClient(http, folder);
+            const string name = "VinceProductivityTray-0.9.16-win-arm64-Setup.exe";
+            const string prefix = "https://github.com/CheggenOnline/vince-productivity-tray/releases/download/v0.9.16/";
+            var release = new UpdateRelease(new Version(0, 9, 16), "synthetic", "https://github.com/CheggenOnline/vince-productivity-tray/releases/tag/v0.9.16",
+                prefix + name, prefix + name + ".sha256", name);
+            var path = await client.DownloadVerifiedAsync(release, CancellationToken.None);
+            True(File.ReadAllBytes(path).SequenceEqual(handler.Payload), "Downloaded bytes changed.");
+            handler.WrongHash = true;
+            var rejected = false;
+            try { await client.DownloadVerifiedAsync(release, CancellationToken.None); }
+            catch (InvalidDataException) { rejected = true; }
+            True(rejected, "Checksum mismatch was accepted.");
+            True(!File.Exists(path + ".download"), "Corrupt partial download was retained.");
+            True(File.ReadAllBytes(path).SequenceEqual(handler.Payload), "Failed retry damaged the earlier verified download.");
+            rejected = false;
+            try { await client.DownloadVerifiedAsync(release with { InstallerUrl = "https://example.org/installer.exe" }, CancellationToken.None); }
+            catch (InvalidDataException) { rejected = true; }
+            True(rejected, "An external download was accepted.");
+            True(!UpdaterPolicy.IsAutoInstallConfigured, "Downloading enabled unattended setup execution.");
+        }).GetAwaiter().GetResult();
     }
 
     private static void UpdaterCheckScheduleIsBounded()

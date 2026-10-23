@@ -15,7 +15,7 @@ internal sealed class SettingsForm : Form
     private readonly Func<string, HotkeyProbeResult> _probe;
     private readonly CheckBox _recordingEnabled, _notesEnabled, _spellEnabled, _timeEnabled, _autoUpdate;
     private readonly TextBox _notes, _recordings, _spellHotkey, _noteHotkey, _recordHotkey, _timeHotkey, _timeFolder, _workdayStart;
-    private readonly CheckBox _autoRecord, _startup, _hourlyPopup;
+    private readonly CheckBox _autoRecord, _startup, _hourlyPopup, _useCustomers;
     private readonly NumericUpDown _popupStart, _popupEnd, _snooze, _target;
 
     public SettingsForm(AppSettings current, Func<string, HotkeyProbeResult> probe) : this(current, probe, null) { }
@@ -48,21 +48,22 @@ internal sealed class SettingsForm : Form
         var notesTab = FeatureTab("Quick Notes", "Enable quick notes", current.QuickNotesEnabled, out _notesEnabled, out var notes);
         _notes = AddFolderRow(notes, 0, "Notes folder", current.NotesFolder);
         _noteHotkey = AddHotkeyRow(notes, 1, "Quick note hotkey", current.NotesHotkey);
-        AddHelp(notes, 2, "Enter saves the UTF-8 daily note, Shift+Enter adds a line, and Escape cancels.");
+        AddHelp(notes, 2, "The hotkey saves selected text directly with a confirmation tile. Without a readable selection it opens the editor. Enter saves, Shift+Enter adds a line, and Escape cancels.");
         AddActionRow(notes, 3, "Open notes folder", actions?.OpenNotes);
         tabs.TabPages.Add(notesTab);
 
         var timeTab = FeatureTab("Time Capture", "Enable integrated time capture", current.TimeCaptureEnabled, out _timeEnabled, out var time);
         _timeFolder = AddFolderRow(time, 0, "Time log folder", current.TimeCaptureFolder);
         _timeHotkey = AddHotkeyRow(time, 1, "Time capture hotkey", current.TimeCaptureHotkey);
-        _hourlyPopup = AddCheckRow(time, 2, "Hourly popup", current.TimeCaptureHourlyPopup, "At minute 00 within the configured hour range.");
-        _popupStart = AddNumberRow(time, 3, "First popup hour", current.TimeCaptureStartHour, 0, 23);
-        _popupEnd = AddNumberRow(time, 4, "Last popup hour", current.TimeCaptureEndHour, 0, 23);
-        _snooze = AddNumberRow(time, 5, "Snooze minutes", current.TimeCaptureSnoozeMinutes, 1, 240);
-        _workdayStart = AddTextRow(time, 6, "Workday starts", current.TimeCaptureWorkdayStart);
-        _target = AddNumberRow(time, 7, "Daily target hours", current.TimeCaptureTargetHours, 0.5m, 24m, 0.5m);
-        AddHelp(time, 8, "Keep off while legacy TimeCapture.ahk is active to avoid duplicate popups and hotkeys.");
-        AddActionRow(time, 9, "Open time log folder", actions?.OpenTimeLogs);
+        _useCustomers = AddCheckRow(time, 2, "Use customer list", current.TimeCaptureUseCustomerList, "Show customer selection in the popup.");
+        _hourlyPopup = AddCheckRow(time, 3, "Hourly popup", current.TimeCaptureHourlyPopup, "At minute 00 within the configured hour range.");
+        _popupStart = AddNumberRow(time, 4, "First popup hour", current.TimeCaptureStartHour, 0, 23);
+        _popupEnd = AddNumberRow(time, 5, "Last popup hour", current.TimeCaptureEndHour, 0, 23);
+        _snooze = AddNumberRow(time, 6, "Snooze minutes", current.TimeCaptureSnoozeMinutes, 1, 240);
+        _workdayStart = AddTextRow(time, 7, "Workday starts", current.TimeCaptureWorkdayStart);
+        _target = AddNumberRow(time, 8, "Daily target hours", current.TimeCaptureTargetHours, 0.5m, 24m, 0.5m);
+        AddHelp(time, 9, "Keep off while legacy TimeCapture.ahk is active to avoid duplicate popups and hotkeys.");
+        AddActionRow(time, 10, "Open time log folder", actions?.OpenTimeLogs);
         tabs.TabPages.Add(timeTab);
 
         var spellTab = FeatureTab("Spell Check", "Enable spell check", current.SpellcheckEnabled, out _spellEnabled, out var spell);
@@ -81,7 +82,7 @@ internal sealed class SettingsForm : Form
             { MessageBox.Show(this, exception.Message, "Invalid settings", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         };
         buttons.Controls.Add(save); buttons.Controls.Add(cancel);
-        root.Controls.Add(tabs, 0, 0); root.Controls.Add(buttons, 0, 1); Controls.Add(root);
+        root.Controls.Add(tabs, 0, 0); root.Controls.Add(ApplicationFooter.Create(buttons), 0, 1); Controls.Add(root);
         AcceptButton = save; CancelButton = cancel;
     }
 
@@ -94,6 +95,7 @@ internal sealed class SettingsForm : Form
         AutoRecordMeetings = _autoRecord.Checked, StartWithWindows = _startup.Checked,
         AutoUpdateEnabled = _autoUpdate.Enabled && _autoUpdate.Checked,
         TimeCaptureFolder = _timeFolder.Text, TimeCaptureHotkey = _timeHotkey.Text,
+        TimeCaptureUseCustomerList = _useCustomers.Checked,
         TimeCaptureHourlyPopup = _hourlyPopup.Checked, TimeCaptureStartHour = decimal.ToInt32(_popupStart.Value),
         TimeCaptureEndHour = decimal.ToInt32(_popupEnd.Value), TimeCaptureSnoozeMinutes = decimal.ToInt32(_snooze.Value),
         TimeCaptureWorkdayStart = _workdayStart.Text, TimeCaptureTargetHours = _target.Value,
@@ -109,18 +111,10 @@ internal sealed class SettingsForm : Form
         var version = new Label { Text = $"Version: {actions?.Version ?? "development"}", AutoSize = true, Anchor = AnchorStyles.Left };
         c.Controls.Add(version, 0, 1); c.SetColumnSpan(version, 4); Row(c, 1);
         if (actions is not null) version.Text += $"    Status: {actions.ApplicationStatus()}";
-        var credit = new Label
-        {
-            Text = "developed by Christian Holberg Heggen",
-            AutoSize = false,
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-            MinimumSize = new Size(420, 32),
-        };
-        Row(c, 2, 48); c.Controls.Add(credit, 0, 2); c.SetColumnSpan(credit, 4);
+        Row(c, 2, 0);
         startup = AddCheckRow(c, 3, "Start with Windows", current.StartWithWindows, "Current user; enabling asks for separate confirmation.");
         autoUpdate = AddCheckRow(c, 4, "Auto update", current.AutoUpdateEnabled && UpdaterPolicy.IsAutoInstallConfigured,
-            UpdaterPolicy.IsAutoInstallConfigured ? "Install verified signed updates only while recording and drafts are idle." : "Unavailable until repository and Authenticode publisher are configured.");
+            UpdaterPolicy.IsAutoInstallConfigured ? "Install verified signed updates only while recording and drafts are idle." : "Use Download update. Downloaded installers are started manually.");
         autoUpdate.Enabled = UpdaterPolicy.IsAutoInstallConfigured;
         var status = new Label { Text = actions?.UpdateStatus() ?? "Update integration unavailable in this view.", AutoSize = false, Dock = DockStyle.Fill, ForeColor = SystemColors.GrayText };
         Row(c, 5, 58); c.Controls.Add(status, 0, 5); c.SetColumnSpan(status, 4);

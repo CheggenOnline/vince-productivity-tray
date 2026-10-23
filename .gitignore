@@ -2,6 +2,7 @@
 **/bin/
 **/obj/
 artifacts/
+distribution/*.exe
 
 # Local dependency caches
 .nuget-packages/

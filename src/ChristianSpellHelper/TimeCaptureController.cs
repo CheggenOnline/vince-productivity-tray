@@ -18,6 +18,7 @@ internal sealed class TimeCaptureController : IDisposable
     }
 
     public void ShowForEntry() => _form.ShowForEntry();
+    public void RefreshSettings() { if (_form.Visible) _form.RefreshFromDisk(); }
 
     public bool HasUnsavedDraft => _form.HasUnsavedDraft;
 

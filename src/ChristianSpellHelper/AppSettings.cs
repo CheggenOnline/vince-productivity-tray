@@ -16,6 +16,7 @@ internal sealed record AppSettings
     public string RecordingHotkey { get; init; } = "Ctrl+Alt+R";
     public bool AutoRecordMeetings { get; init; }
     public bool TimeCaptureEnabled { get; init; }
+    public bool TimeCaptureUseCustomerList { get; init; } = true;
     public string TimeCaptureHotkey { get; init; } = "Ctrl+Shift+A";
     public string TimeCaptureFolder { get; init; } = @"C:\TimeLog";
     public bool TimeCaptureHourlyPopup { get; init; } = true;

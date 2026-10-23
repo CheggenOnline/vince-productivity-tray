@@ -17,11 +17,17 @@ internal sealed class QuickNoteForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         Width = 520;
-        Height = 130;
+        Height = 180;
         KeyPreview = true;
 
         _input = new TextBox { Multiline = true, Dock = DockStyle.Fill, AcceptsReturn = true, ScrollBars = ScrollBars.Vertical };
-        Controls.Add(_input);
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(8) };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.Controls.Add(_input, 0, 0);
+        layout.Controls.Add(ApplicationFooter.Create(new Label { Text = "Enter to save", AutoSize = true }), 0, 1);
+        Controls.Add(layout);
         KeyDown += HandleKeyDown;
         _input.KeyDown += HandleKeyDown;
         // Keep an unsaved draft visible when focus changes. Only a successful save or

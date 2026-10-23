@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '0.9.14'
+    [string]$Version = '0.9.15',
+    [switch]$Offline
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,6 +11,7 @@ $setupProject = Join-Path $root 'installer\VinceProductivityTray.Setup.csproj'
 $releaseRoot = Join-Path $root 'artifacts\release'
 $env:NUGET_SCRATCH = Join-Path $root '.nuget-scratch'
 $env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = '1'
+$restoreConfig = if ($Offline) { Join-Path $root 'NuGet.Config' } else { Join-Path $root 'NuGet.Online.Config' }
 
 function Get-PeMachine([string]$Path) {
     $stream = [System.IO.File]::OpenRead($Path)
@@ -39,7 +41,7 @@ foreach ($rid in @('win-arm64', 'win-x64')) {
     $appOutput = Join-Path $releaseRoot "app-$Version-$rid"
     $payload = Join-Path $releaseRoot "payload-$Version-$rid.zip"
     $setupOutput = Join-Path $releaseRoot "setup-$Version-$rid"
-    dotnet restore $appProject -r $rid --configfile (Join-Path $root 'NuGet.Online.Config') --disable-parallel -m:1
+    dotnet restore $appProject -r $rid --configfile $restoreConfig --disable-parallel -m:1
     if ($LASTEXITCODE -ne 0) { throw "Application restore failed for $rid." }
     dotnet publish $appProject -c Release -r $rid --self-contained true --no-restore -o $appOutput -p:Version=$Version -p:DebugType=None -p:DebugSymbols=false -m:1 -nodeReuse:false -p:UseSharedCompilation=false
     if ($LASTEXITCODE -ne 0) { throw "Application publish failed for $rid." }
@@ -66,7 +68,7 @@ foreach ($rid in @('win-arm64', 'win-x64')) {
     if (Test-Path -LiteralPath $payload) { Remove-Item -LiteralPath $payload -Force }
     Compress-Archive -Path (Join-Path $appOutput '*') -DestinationPath $payload -CompressionLevel Optimal
 
-    dotnet restore $setupProject -r $rid --configfile (Join-Path $root 'NuGet.Online.Config') --disable-parallel -m:1
+    dotnet restore $setupProject -r $rid --configfile $restoreConfig --disable-parallel -m:1
     if ($LASTEXITCODE -ne 0) { throw "Installer restore failed for $rid." }
     dotnet publish $setupProject -c Release -r $rid --self-contained true --no-restore -o $setupOutput -p:Version=$Version -p:PayloadZip=$payload -p:DebugType=None -p:DebugSymbols=false -m:1 -nodeReuse:false -p:UseSharedCompilation=false
     if ($LASTEXITCODE -ne 0) { throw "Installer publish failed for $rid." }
@@ -88,3 +90,5 @@ foreach ($rid in @('win-arm64', 'win-x64')) {
         runtimeExecutionTested = $false
     } | ConvertTo-Json | Set-Content -LiteralPath ($asset + '.manifest.json') -Encoding utf8NoBOM
 }
+
+& (Join-Path $PSScriptRoot 'prepare-distribution.ps1') -Version $Version

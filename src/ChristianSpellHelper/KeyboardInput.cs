@@ -26,6 +26,17 @@ internal static class KeyboardInput
 
     public static bool Copy() => SendControlChord(VirtualKeyC);
 
+    public static bool WaitForHotkeyRelease(HotkeyDefinition hotkey) =>
+        InputTimingPolicy.WaitForStableRelease(
+            InputTimingPolicy.HotkeyReleaseTimeout, InputTimingPolicy.HotkeyReleaseStableDuration,
+            () => IsDown((ushort)hotkey.VirtualKey) ||
+                  (hotkey.Modifiers & 1) != 0 && IsDown(0x12) ||
+                  (hotkey.Modifiers & 2) != 0 && IsDown(VirtualKeyControl) ||
+                  (hotkey.Modifiers & 4) != 0 && IsDown(VirtualKeyShift) ||
+                  (hotkey.Modifiers & 8) != 0 && (IsDown(0x5B) || IsDown(0x5C)),
+            () => Environment.TickCount64,
+            () => { Application.DoEvents(); Thread.Sleep(5); });
+
     public static bool Paste() => SendControlChord(VirtualKeyV);
 
     public static bool PasteDirect(IntPtr focusWindow)
